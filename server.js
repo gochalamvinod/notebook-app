@@ -41,6 +41,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  const bundledFile = path.join(__dirname, 'data', 'notebook.enc.json');
+  if (isVercel && !fs.existsSync(DATA_FILE) && fs.existsSync(bundledFile)) {
+    fs.copyFileSync(bundledFile, DATA_FILE);
+  }
 } catch (e) {}
 
 // Held in memory for the lifetime of this process.
@@ -80,20 +84,11 @@ function decryptData(payload, key) {
 }
 
 // ---------- Session Token Helper for Serverless Persistence ----------
-function getSessionSecret() {
-  let salt = 'default-leatherbound-salt';
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      salt = readFile().salt || salt;
-    }
-  } catch (e) {}
-  return crypto.createHash('sha256').update(salt + '-vault-session-key-secret').digest();
-}
+const SESSION_SECRET = crypto.createHash('sha256').update(process.env.SESSION_SECRET || 'leatherbound-master-session-salt-v3').digest();
 
 function encryptSessionToken(key) {
-  const secret = getSessionSecret();
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', secret, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', SESSION_SECRET, iv);
   const encrypted = Buffer.concat([cipher.update(key), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return iv.toString('hex') + '.' + authTag.toString('hex') + '.' + encrypted.toString('hex');
@@ -104,16 +99,23 @@ function decryptSessionToken(token) {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   try {
-    const secret = getSessionSecret();
     const iv = Buffer.from(parts[0], 'hex');
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = Buffer.from(parts[2], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', secret, iv);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', SESSION_SECRET, iv);
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(encrypted), decipher.final()]);
   } catch (e) {
     return null;
   }
+}
+
+function setSessionCookie(res, token) {
+  const cookieVal = encodeURIComponent(token);
+  const flags = isVercel
+    ? 'Path=/; HttpOnly; SameSite=None; Secure; Max-Age=2592000'
+    : 'Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000';
+  res.set('Set-Cookie', `notebook_session=${cookieVal}; ${flags}`);
 }
 
 function getSessionKey(req) {
@@ -243,7 +245,7 @@ app.post('/api/setup', (req, res) => {
   sessionKey = key;
 
   const token = encryptSessionToken(key);
-  res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+  setSessionCookie(res, token);
   res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
 });
 
@@ -265,7 +267,7 @@ app.post('/api/unlock', (req, res) => {
     }
 
     const token = encryptSessionToken(key);
-    res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+    setSessionCookie(res, token);
     res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(401).json({ error: 'Incorrect password.' });
@@ -438,7 +440,7 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
     sessionKey = newKey;
 
     const token = encryptSessionToken(newKey);
-    res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+    setSessionCookie(res, token);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Could not change the password.' });
@@ -600,7 +602,7 @@ function extractMeta(html, baseUrl) {
   };
 }
 
-app.get('/api/link-preview', requireUnlocked, (req, res) => {
+app.get('/api/link-preview', (req, res) => {
   const target = typeof req.query.url === 'string' ? req.query.url : '';
   if (!target) return res.status(400).json({ ok: false, error: 'Missing url' });
 
@@ -877,14 +879,14 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
   });
 }
 
-app.get('/api/proxy', requireUnlocked, (req, res) => {
+app.get('/api/proxy', (req, res) => {
   const targetUrl = typeof req.query.url === 'string' ? req.query.url : '';
   if (!targetUrl) return res.status(400).json({ error: 'Missing url parameter' });
   streamProxy(targetUrl, 8, res);
 });
 
 // ---------- generic API / subresource proxy (handles GET, POST, PUT, OPTIONS, etc.) ----------
-app.all('/api/proxy-api', requireUnlocked, (req, res) => {
+app.all('/api/proxy-api', (req, res) => {
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
