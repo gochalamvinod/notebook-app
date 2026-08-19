@@ -657,11 +657,7 @@ function buildInjection(baseHref, targetOrigin) {
     `var _origOrigin=${JSON.stringify(targetOrigin)};` +
     `var _proxyApi='/api/proxy-api?url=';` +
     `var _proxyPage='/api/proxy?url=';` +
-    // 1. Anti-frame busting & frame element simulation
-    `try{Object.defineProperty(window,'top',{get:function(){return window.self},configurable:false})}catch(e){}` +
-    `try{Object.defineProperty(window,'parent',{get:function(){return window.self},configurable:false})}catch(e){}` +
-    `try{Object.defineProperty(window,'frameElement',{get:function(){return null},configurable:false})}catch(e){}` +
-    // 2. Always report online to prevent SPA offline-detection screens
+    // 1. Always report online to prevent SPA offline-detection screens
     `try{Object.defineProperty(navigator,'onLine',{get:function(){return true},configurable:false})}catch(e){}` +
     // 3. Neutralize Service Workers (avoids broken offline caches on localhost)
     `if(navigator.serviceWorker){` +
