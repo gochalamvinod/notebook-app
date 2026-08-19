@@ -1,0 +1,13 @@
+{
+  "name": "leatherbound-notebook",
+  "version": "1.0.0",
+  "description": "A private, encrypted, 3D page-flipping notebook you run on your own machine.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

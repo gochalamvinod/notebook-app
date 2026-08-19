@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leatherbound Notebook</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="room">
+
+  <!-- ============ LOCK SCREEN ============ -->
+  <section id="lockScreen" class="lock-screen">
+    <div class="lock-card">
+      <div class="clasp" id="clasp" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="40" height="40">
+          <rect x="10" y="26" width="44" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+          <path id="claspShackle" d="M20 26 V18 a12 12 0 0 1 24 0 V26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="32" cy="40" r="3.5" fill="currentColor"/>
+        </svg>
+      </div>
+      <h1 id="lockTitle">Your Notebook</h1>
+      <p id="lockSubtitle" class="lock-sub">Loading&hellip;</p>
+
+      <form id="lockForm" class="lock-form">
+        <label class="field">
+          <span>Password</span>
+          <input type="password" id="passwordInput" autocomplete="current-password" required />
+        </label>
+        <label class="field" id="confirmField" hidden>
+          <span>Confirm password</span>
+          <input type="password" id="confirmInput" autocomplete="new-password" />
+        </label>
+        <button type="submit" id="lockSubmit" class="brass-btn">Unlock</button>
+        <p id="lockError" class="lock-error" role="alert"></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ MAIN APP ============ -->
+  <section id="app" class="app" hidden>
+
+    <header class="toolbar">
+      <input id="titleInput" class="title-input" spellcheck="false" />
+
+      <div class="tool-group">
+        <select id="fontSelect" title="Font"></select>
+        <select id="sizeSelect" title="Size"></select>
+      </div>
+
+      <div class="tool-group">
+        <button type="button" data-cmd="bold" class="icon-btn" title="Bold"><b>B</b></button>
+        <button type="button" data-cmd="italic" class="icon-btn" title="Italic"><i>I</i></button>
+        <button type="button" data-cmd="underline" class="icon-btn" title="Underline"><u>U</u></button>
+      </div>
+
+      <div class="tool-group">
+        <button type="button" data-cmd="justifyLeft" class="icon-btn" title="Align left">≡◄</button>
+        <button type="button" data-cmd="justifyCenter" class="icon-btn" title="Align center">≡◆</button>
+        <button type="button" data-cmd="justifyRight" class="icon-btn" title="Align right">►≡</button>
+      </div>
+
+      <div class="tool-group">
+        <label class="swatch" title="Text color">
+          A
+          <input type="color" id="colorInput" value="#2c2416" />
+        </label>
+        <label class="swatch highlight" title="Highlight">
+          H
+          <input type="color" id="highlightInput" value="#f6e27a" />
+        </label>
+        <button type="button" id="imageBtn" class="icon-btn" title="Insert image from file">🖼</button>
+        <button type="button" id="linkBtn" class="icon-btn" title="Insert a live link (paste a URL and I'll try to preview it)">🔗</button>
+      </div>
+
+      <div class="tool-group right">
+        <span id="saveStatus" class="save-status">Saved</span>
+        <button type="button" id="settingsBtn" class="icon-btn" title="Settings">⚙</button>
+        <button type="button" id="lockBtn" class="icon-btn" title="Lock notebook">🔒</button>
+      </div>
+    </header>
+
+    <input type="file" id="imageFile" accept="image/*" hidden />
+
+    <main class="book-room">
+      <div class="book" id="book">
+
+        <div class="page-viewport" id="pageViewport">
+
+          <!-- LEFT PAGE -->
+          <div class="page-slot slot-left" id="slotLeft">
+            <div class="page under" id="underLeft"></div>
+            <div class="page current" id="leftPage" contenteditable="true" spellcheck="false" data-slot="left"></div>
+            <div class="flip-layer pivot-right" id="flipLayerLeft">
+              <div class="flip-face front"></div>
+              <div class="flip-face back"></div>
+            </div>
+          </div>
+
+          <div class="spine-crease" aria-hidden="true"></div>
+
+          <!-- RIGHT PAGE -->
+          <div class="page-slot slot-right" id="slotRight">
+            <div class="page under" id="underRight"></div>
+            <div class="page current" id="rightPage" contenteditable="true" spellcheck="false" data-slot="right"></div>
+            <div class="page-empty" id="rightEmpty" hidden>
+              <span>The notebook ends here.</span>
+              <button type="button" id="addPageInline" class="brass-link">+ Add a page</button>
+            </div>
+            <div class="flip-layer pivot-left" id="flipLayerRight">
+              <div class="flip-face front"></div>
+              <div class="flip-face back"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <button type="button" id="prevBtn" class="page-turn left" title="Previous spread">‹</button>
+        <button type="button" id="nextBtn" class="page-turn right" title="Next spread">›</button>
+      </div>
+
+      <div class="page-controls">
+        <button type="button" id="addPageBtn" class="brass-link">+ Add page</button>
+        <span id="pageIndicator" class="page-indicator">Spread 1 of 1</span>
+        <button type="button" id="deletePageBtn" class="brass-link danger">Delete page</button>
+      </div>
+    </main>
+
+    <!-- ============ SETTINGS DRAWER ============ -->
+    <div id="settingsDrawer" class="settings-drawer" hidden>
+      <div class="settings-card">
+        <h2>Settings</h2>
+        <label class="field">
+          <span>New password</span>
+          <input type="password" id="newPasswordInput" autocomplete="new-password" />
+        </label>
+        <label class="field">
+          <span>Confirm new password</span>
+          <input type="password" id="newPasswordConfirm" autocomplete="new-password" />
+        </label>
+        <button type="button" id="changePasswordBtn" class="brass-btn">Change password</button>
+        <p id="settingsMsg" class="lock-error" role="status"></p>
+        <button type="button" id="closeSettingsBtn" class="brass-link">Close</button>
+      </div>
+    </div>
+
+  </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

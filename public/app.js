@@ -1,0 +1,1193 @@
+/* Leatherbound Notebook — client logic
+   Two-page spread edition: pages[] are paired into spreads (left/right),
+   page turns try a WebGL (three.js) leaf-turn first and fall back to a
+   plain CSS 3D rotation if WebGL isn't available or anything throws.
+
+   New in this version:
+   - Images uploaded to server (data/images/), not stored as base64
+   - Inline image overlay: click an image to resize, move, or delete it
+   - Polished live URL cards with title + thumbnail + domain badge
+*/
+(function () {
+  'use strict';
+
+  // ---------- element references ----------
+  const lockScreen = document.getElementById('lockScreen');
+  const lockCard = document.querySelector('.lock-card');
+  const lockTitle = document.getElementById('lockTitle');
+  const lockSubtitle = document.getElementById('lockSubtitle');
+  const lockForm = document.getElementById('lockForm');
+  const passwordInput = document.getElementById('passwordInput');
+  const confirmField = document.getElementById('confirmField');
+  const confirmInput = document.getElementById('confirmInput');
+  const lockSubmit = document.getElementById('lockSubmit');
+  const lockError = document.getElementById('lockError');
+  const clasp = document.getElementById('clasp');
+
+  const appEl = document.getElementById('app');
+  const titleInput = document.getElementById('titleInput');
+  const fontSelect = document.getElementById('fontSelect');
+  const sizeSelect = document.getElementById('sizeSelect');
+  const colorInput = document.getElementById('colorInput');
+  const highlightInput = document.getElementById('highlightInput');
+  const imageBtn = document.getElementById('imageBtn');
+  const imageFile = document.getElementById('imageFile');
+  const linkBtn = document.getElementById('linkBtn');
+  const saveStatus = document.getElementById('saveStatus');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const lockBtn = document.getElementById('lockBtn');
+
+  const bookEl = document.getElementById('book');
+  const pageViewportEl = document.getElementById('pageViewport');
+  const underLeftEl = document.getElementById('underLeft');
+  const underRightEl = document.getElementById('underRight');
+  const leftPageEl = document.getElementById('leftPage');
+  const rightPageEl = document.getElementById('rightPage');
+  const rightEmptyEl = document.getElementById('rightEmpty');
+  const addPageInlineBtn = document.getElementById('addPageInline');
+  const flipLayerLeftEl = document.getElementById('flipLayerLeft');
+  const flipLayerRightEl = document.getElementById('flipLayerRight');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const addPageBtn = document.getElementById('addPageBtn');
+  const deletePageBtn = document.getElementById('deletePageBtn');
+  const pageIndicator = document.getElementById('pageIndicator');
+
+  const settingsDrawer = document.getElementById('settingsDrawer');
+  const newPasswordInput = document.getElementById('newPasswordInput');
+  const newPasswordConfirm = document.getElementById('newPasswordConfirm');
+  const changePasswordBtn = document.getElementById('changePasswordBtn');
+  const settingsMsg = document.getElementById('settingsMsg');
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+
+  // ---------- constants ----------
+  const FONTS = [
+    { label: 'Georgia', value: "Georgia, 'Times New Roman', serif" },
+    { label: 'Times New Roman', value: "'Times New Roman', Times, serif" },
+    { label: 'Palatino', value: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+    { label: 'Garamond', value: "Garamond, 'Book Antiqua', serif" },
+    { label: 'Baskerville', value: "Baskerville, 'Times New Roman', serif" },
+    { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+    { label: 'Helvetica', value: 'Helvetica, Arial, sans-serif' },
+    { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+    { label: 'Trebuchet MS', value: "'Trebuchet MS', sans-serif" },
+    { label: 'Tahoma', value: 'Tahoma, Geneva, sans-serif' },
+    { label: 'Courier New', value: "'Courier New', Courier, monospace" },
+    { label: 'Consolas', value: "Consolas, 'Courier New', monospace" },
+    { label: 'Comic Sans MS', value: "'Comic Sans MS', 'Comic Sans', cursive" },
+    { label: 'Brush Script', value: "'Brush Script MT', 'Segoe Script', cursive" },
+    { label: 'Papyrus', value: 'Papyrus, fantasy' },
+    { label: 'Impact', value: "Impact, 'Arial Narrow Bold', sans-serif" },
+  ];
+  const SIZES = ['12px', '14px', '16px', '18px', '20px', '22px', '24px', '28px', '32px', '36px'];
+  const DEFAULT_FONT = FONTS[0].value;
+  const DEFAULT_SIZE = '18px';
+
+  // ---------- state ----------
+  let notebook = null;
+  let leftIndex = 0;       // index of the page shown in the LEFT slot; always even
+  let activeSlot = 'left'; // 'left' | 'right' — whichever page last had focus
+  let activePageEl = null;
+  let flipping = false;
+  let saveTimer = null;
+  let savedRange = null;
+  let mode = 'unlock'; // or 'setup'
+
+  // ---------- init ----------
+  async function init() {
+    populateControls();
+    try {
+      const res = await fetch('/api/status');
+      const status = await res.json();
+
+      if (status.unlocked) {
+        const nb = await fetch('/api/notebook').then((r) => r.json());
+        if (nb.ok) {
+          bootFromNotebook(nb.notebook);
+          return;
+        }
+      }
+
+      mode = status.setupNeeded ? 'setup' : 'unlock';
+      if (mode === 'setup') {
+        lockTitle.textContent = 'Begin Your Notebook';
+        lockSubtitle.textContent = 'Choose a password. It encrypts everything you write — there is no way to recover your notes without it, so keep it somewhere safe.';
+        confirmField.hidden = false;
+        confirmInput.required = true;
+        lockSubmit.textContent = 'Create Notebook';
+      } else {
+        lockTitle.textContent = 'Your Notebook';
+        lockSubtitle.textContent = 'Enter your password to open it.';
+        confirmField.hidden = true;
+        confirmInput.required = false;
+        lockSubmit.textContent = 'Unlock';
+      }
+      passwordInput.focus();
+    } catch (err) {
+      lockSubtitle.textContent = 'Could not reach the server. Is it running?';
+    }
+  }
+
+  function populateControls() {
+    FONTS.forEach((f) => {
+      const opt = document.createElement('option');
+      opt.value = f.value;
+      opt.textContent = f.label;
+      fontSelect.appendChild(opt);
+    });
+    SIZES.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s.replace('px', '');
+      sizeSelect.appendChild(opt);
+    });
+  }
+
+  // ---------- lock screen ----------
+  lockForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    lockError.textContent = '';
+    const password = passwordInput.value;
+
+    if (mode === 'setup') {
+      if (password !== confirmInput.value) {
+        lockError.textContent = 'Passwords do not match.';
+        shakeCard();
+        return;
+      }
+      if (password.length < 4) {
+        lockError.textContent = 'Use at least 4 characters.';
+        shakeCard();
+        return;
+      }
+      await submitAuth('/api/setup', { password });
+    } else {
+      await submitAuth('/api/unlock', { password });
+    }
+  });
+
+  async function submitAuth(url, body) {
+    lockSubmit.disabled = true;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        lockError.textContent = data.error || 'Something went wrong.';
+        shakeCard();
+        lockSubmit.disabled = false;
+        return;
+      }
+      clasp.classList.add('open');
+      await new Promise((r) => setTimeout(r, 450));
+      bootFromNotebook(data.notebook);
+    } catch (err) {
+      lockError.textContent = 'Could not reach the server.';
+      lockSubmit.disabled = false;
+    }
+  }
+
+  function shakeCard() {
+    lockCard.classList.remove('shake');
+    void lockCard.offsetWidth;
+    lockCard.classList.add('shake');
+  }
+
+  // ---------- boot main app ----------
+  function bootFromNotebook(nb) {
+    notebook = nb;
+    leftIndex = 0;
+    activeSlot = 'left';
+    activePageEl = leftPageEl;
+    lockScreen.hidden = true;
+    appEl.hidden = false;
+    titleInput.value = notebook.title || 'My Notebook';
+
+    setupPageEditable(leftPageEl, 'left');
+    setupPageEditable(rightPageEl, 'right');
+    setupDragDrop(leftPageEl);
+    setupDragDrop(rightPageEl);
+
+    renderSpread();
+
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === leftPageEl || document.activeElement === rightPageEl) refreshToolbarState();
+    });
+  }
+
+  // ---------- rendering a spread ----------
+  function pageDataAt(i) {
+    return notebook.pages[i] || null;
+  }
+
+  function renderSpread() {
+    const leftData = pageDataAt(leftIndex);
+    const rightData = pageDataAt(leftIndex + 1);
+
+    leftPageEl.innerHTML = leftData ? (leftData.html || '') : '';
+    applyPageStyle(leftPageEl, leftData || {});
+    underLeftEl.innerHTML = '';
+
+    if (rightData) {
+      rightEmptyEl.hidden = true;
+      rightPageEl.hidden = false;
+      rightPageEl.innerHTML = rightData.html || '';
+      applyPageStyle(rightPageEl, rightData);
+    } else {
+      rightPageEl.hidden = true;
+      rightPageEl.innerHTML = '';
+      rightEmptyEl.hidden = false;
+    }
+    underRightEl.innerHTML = '';
+
+    // Keep the active slot pointing somewhere real.
+    if (activeSlot === 'right' && !rightData) activeSlot = 'left';
+    activePageEl = activeSlot === 'right' ? rightPageEl : leftPageEl;
+
+    const activeData = activeSlot === 'right' ? rightData : leftData;
+    if (activeData) {
+      fontSelect.value = activeData.font || DEFAULT_FONT;
+      sizeSelect.value = activeData.fontSize || DEFAULT_SIZE;
+    }
+
+    updateNav();
+
+    // Wire up image click overlays for the freshly-rendered pages.
+    wireImageOverlays(leftPageEl);
+    wireImageOverlays(rightPageEl);
+
+    // Wire up drag-to-resize on live-embed iframe containers.
+    wireEmbedResizers(leftPageEl);
+    wireEmbedResizers(rightPageEl);
+  }
+
+  function applyPageStyle(el, page) {
+    el.style.fontFamily = page.font || DEFAULT_FONT;
+    el.style.fontSize = page.fontSize || DEFAULT_SIZE;
+  }
+
+  function updateNav() {
+    prevBtn.disabled = leftIndex <= 0 || flipping;
+    nextBtn.disabled = (leftIndex + 2) >= notebook.pages.length || flipping;
+    deletePageBtn.disabled = notebook.pages.length <= 1;
+    const totalSpreads = Math.max(1, Math.ceil(notebook.pages.length / 2));
+    const spreadNum = Math.floor(leftIndex / 2) + 1;
+    const pageWord = notebook.pages.length === 1 ? 'page' : 'pages';
+    pageIndicator.textContent = `Spread ${spreadNum} of ${totalSpreads} · ${notebook.pages.length} ${pageWord}`;
+  }
+
+  function syncSpreadFromDOM() {
+    const leftData = pageDataAt(leftIndex);
+    if (leftData) leftData.html = leftPageEl.innerHTML;
+    const rightData = pageDataAt(leftIndex + 1);
+    if (rightData && !rightPageEl.hidden) rightData.html = rightPageEl.innerHTML;
+  }
+
+  // ---------- 3D page flip (three.js, with CSS fallback) ----------
+  let flip3dPromise = null;
+  function loadFlip3d() {
+    if (!flip3dPromise) {
+      flip3dPromise = import('./flip3d.js').catch((err) => {
+        console.warn('Heavy 3D page flip unavailable, using the CSS fallback instead.', err);
+        return null;
+      });
+    }
+    return flip3dPromise;
+  }
+
+  function cssFlip(direction, flippingSlot, frontHTML, frontData, backData) {
+    return new Promise((resolve) => {
+      const layer = flippingSlot === 'right' ? flipLayerRightEl : flipLayerLeftEl;
+      const front = layer.querySelector('.flip-face.front');
+      const back = layer.querySelector('.flip-face.back');
+
+      front.innerHTML = frontHTML;
+      applyPageStyle(front, frontData || {});
+      back.innerHTML = backData ? (backData.html || '') : '';
+      applyPageStyle(back, backData || {});
+
+      bookEl.classList.add('flipping');
+      layer.style.display = 'block';
+      layer.classList.remove('flipping-next', 'flipping-prev');
+      void layer.offsetWidth; // reflow so the reset transform registers before animating
+      layer.classList.add(direction === 'next' ? 'flipping-next' : 'flipping-prev');
+
+      const onEnd = () => {
+        layer.removeEventListener('transitionend', onEnd);
+        layer.style.display = 'none';
+        layer.classList.remove('flipping-next', 'flipping-prev');
+        resolve();
+      };
+      layer.addEventListener('transitionend', onEnd, { once: true });
+    });
+  }
+
+  async function flip(direction) {
+    if (flipping || !notebook) return;
+    const targetLeft = direction === 'next' ? leftIndex + 2 : leftIndex - 2;
+    if (direction === 'next' && targetLeft >= notebook.pages.length) return;
+    if (direction === 'prev' && targetLeft < 0) return;
+
+    syncSpreadFromDOM();
+
+    const flippingSlot = direction === 'next' ? 'right' : 'left';
+    const frontEl = flippingSlot === 'right' ? rightPageEl : leftPageEl;
+    const frontData = flippingSlot === 'right' ? pageDataAt(leftIndex + 1) : pageDataAt(leftIndex);
+    const backIndex = direction === 'next' ? targetLeft : targetLeft + 1;
+    const backData = pageDataAt(backIndex);
+    const underIndex = direction === 'next' ? targetLeft + 1 : targetLeft;
+    const underData = pageDataAt(underIndex);
+    const underEl = flippingSlot === 'right' ? underRightEl : underLeftEl;
+
+    // Pre-load what will be revealed underneath the flipping leaf once it
+    // clears this slot, so there's nothing left to swap in visibly.
+    underEl.innerHTML = underData ? (underData.html || '') : '';
+    applyPageStyle(underEl, underData || {});
+
+    flipping = true;
+    updateNav();
+    bookEl.classList.add('flipping');
+
+    let usedWebgl = false;
+    try {
+      const mod = await loadFlip3d();
+      if (mod && typeof mod.isWebglAvailable === 'function' && mod.isWebglAvailable()) {
+        const bookRect = pageViewportEl.getBoundingClientRect();
+        await mod.playFlip({
+          direction,
+          bookRect,
+          frontEl,
+          backHTML: backData ? (backData.html || '') : '',
+          backFont: (backData && backData.font) || (frontData && frontData.font) || DEFAULT_FONT,
+          backFontSize: (backData && backData.fontSize) || (frontData && frontData.fontSize) || DEFAULT_SIZE,
+        });
+        usedWebgl = true;
+      }
+    } catch (err) {
+      console.warn('3D flip failed, falling back to the CSS page-turn.', err);
+    }
+
+    if (!usedWebgl) {
+      await cssFlip(direction, flippingSlot, frontEl.innerHTML, frontData, backData);
+    }
+
+    leftIndex = targetLeft;
+    activeSlot = direction === 'next' ? 'left' : 'right';
+    renderSpread();
+    flipping = false;
+    bookEl.classList.remove('flipping');
+    updateNav();
+  }
+
+  prevBtn.addEventListener('click', () => flip('prev'));
+  nextBtn.addEventListener('click', () => flip('next'));
+
+  // ---------- add / delete pages ----------
+  async function addPage() {
+    syncSpreadFromDOM();
+    const base = pageDataAt(leftIndex) || pageDataAt(notebook.pages.length - 1) || { font: DEFAULT_FONT, fontSize: DEFAULT_SIZE };
+    const newPage = { id: 'p-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), font: base.font, fontSize: base.fontSize, html: '' };
+
+    if (!pageDataAt(leftIndex + 1)) {
+      // Right slot of this spread is empty — fill it, no flip needed.
+      notebook.pages.splice(leftIndex + 1, 0, newPage);
+      renderSpread();
+      activeSlot = 'right';
+      activePageEl = rightPageEl;
+      rightPageEl.focus();
+    } else {
+      // Insert a fresh spread right after this one and turn to it.
+      notebook.pages.splice(leftIndex + 2, 0, newPage);
+      await flip('next');
+      activeSlot = 'left';
+      activePageEl = leftPageEl;
+      leftPageEl.focus();
+    }
+    scheduleSave();
+  }
+
+  addPageBtn.addEventListener('click', addPage);
+  addPageInlineBtn.addEventListener('click', addPage);
+
+  deletePageBtn.addEventListener('click', () => {
+    if (notebook.pages.length <= 1) return;
+    const targetIdx = activeSlot === 'right' && pageDataAt(leftIndex + 1) ? leftIndex + 1 : leftIndex;
+    if (!pageDataAt(targetIdx)) return;
+    if (!confirm('Delete this page? This cannot be undone.')) return;
+
+    notebook.pages.splice(targetIdx, 1);
+    while (leftIndex > 0 && leftIndex >= notebook.pages.length) leftIndex -= 2;
+    leftIndex = Math.max(0, leftIndex);
+    renderSpread();
+    scheduleSave();
+  });
+
+  // ---------- editable page wiring ----------
+  function setupPageEditable(el, slot) {
+    el.addEventListener('focus', () => {
+      activeSlot = slot;
+      activePageEl = el;
+      const data = slot === 'right' ? pageDataAt(leftIndex + 1) : pageDataAt(leftIndex);
+      if (data) {
+        fontSelect.value = data.font || DEFAULT_FONT;
+        sizeSelect.value = data.fontSize || DEFAULT_SIZE;
+      }
+    });
+    el.addEventListener('input', () => {
+      syncSpreadFromDOM();
+      scheduleSave();
+      linkifyRecentTyping(el);
+    });
+    el.addEventListener('mouseup', saveSelection);
+    el.addEventListener('keyup', (e) => {
+      saveSelection();
+      if (e.key === ' ' || e.key === 'Enter') linkifyRecentTyping(el);
+    });
+    el.addEventListener('paste', (e) => handlePaste(e, el));
+  }
+
+  function setupDragDrop(el) {
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    el.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      activeSlot = el === rightPageEl ? 'right' : 'left';
+      activePageEl = el;
+
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file && file.type && file.type.startsWith('image/')) {
+        try {
+          const url = await uploadImageFile(file);
+          placeCaretFromPoint(e.clientX, e.clientY, el);
+          document.execCommand('insertImage', false, url);
+          syncSpreadFromDOM();
+          scheduleSave();
+          wireImageOverlays(el);
+        } catch (err) {
+          alert('Could not add that image.');
+        }
+        return;
+      }
+
+      const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+      const trimmed = text ? text.trim() : '';
+      if (/^https?:\/\/\S+$/i.test(trimmed)) {
+        placeCaretFromPoint(e.clientX, e.clientY, el);
+        const html = await buildUrlInsertHTML(trimmed);
+        document.execCommand('insertHTML', false, html);
+        syncSpreadFromDOM();
+        scheduleSave();
+      }
+    });
+  }
+
+  function placeCaretFromPoint(x, y, el) {
+    el.focus();
+    let range = null;
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(x, y);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(x, y);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+      }
+    }
+    if (range) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  // ---------- toolbar: text formatting ----------
+  document.querySelectorAll('[data-cmd]').forEach((btn) => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep selection alive
+    btn.addEventListener('click', () => {
+      document.execCommand(btn.dataset.cmd, false, null);
+      refreshToolbarState();
+      syncSpreadFromDOM();
+      scheduleSave();
+    });
+  });
+
+  function refreshToolbarState() {
+    ['bold', 'italic', 'underline', 'justifyLeft', 'justifyCenter', 'justifyRight'].forEach((cmd) => {
+      const btn = document.querySelector(`[data-cmd="${cmd}"]`);
+      if (!btn) return;
+      try {
+        btn.classList.toggle('active', document.queryCommandState(cmd));
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  }
+
+  fontSelect.addEventListener('change', () => {
+    const data = activeSlot === 'right' ? pageDataAt(leftIndex + 1) : pageDataAt(leftIndex);
+    if (!data) return;
+    data.font = fontSelect.value;
+    activePageEl.style.fontFamily = data.font;
+    scheduleSave();
+  });
+
+  sizeSelect.addEventListener('change', () => {
+    const data = activeSlot === 'right' ? pageDataAt(leftIndex + 1) : pageDataAt(leftIndex);
+    if (!data) return;
+    data.fontSize = sizeSelect.value;
+    activePageEl.style.fontSize = data.fontSize;
+    scheduleSave();
+  });
+
+  function saveSelection() {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const r = sel.getRangeAt(0);
+      if (activePageEl && activePageEl.contains(r.commonAncestorContainer)) savedRange = r.cloneRange();
+    }
+  }
+  function restoreSelection() {
+    if (!savedRange) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+
+  colorInput.addEventListener('input', () => {
+    activePageEl.focus();
+    restoreSelection();
+    document.execCommand('foreColor', false, colorInput.value);
+    syncSpreadFromDOM();
+    scheduleSave();
+  });
+
+  highlightInput.addEventListener('input', () => {
+    activePageEl.focus();
+    restoreSelection();
+    document.execCommand('hiliteColor', false, highlightInput.value);
+    syncSpreadFromDOM();
+    scheduleSave();
+  });
+
+  // ---------- images: upload to server, insert /images/... URL ----------
+
+  imageBtn.addEventListener('click', () => {
+    saveSelection();
+    imageFile.click();
+  });
+
+  imageFile.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const url = await uploadImageFile(file);
+      activePageEl.focus();
+      restoreSelection();
+      document.execCommand('insertImage', false, url);
+      syncSpreadFromDOM();
+      scheduleSave();
+      wireImageOverlays(activePageEl);
+    } catch (err) {
+      alert('Could not add that image: ' + err.message);
+    } finally {
+      imageFile.value = '';
+    }
+  });
+
+  /**
+   * Resize the image client-side, then POST it to /api/images.
+   * Returns a server-relative URL like "/images/abc123.jpg".
+   */
+  async function uploadImageFile(file, maxDim = 1100, quality = 0.85) {
+    const dataUrl = await resizeToDataUrl(file, maxDim, quality);
+    const extMatch = file.type.match(/image\/([a-z+]+)/i);
+    const ext = extMatch ? extMatch[1].replace('jpeg', 'jpg') : 'jpg';
+    const res = await fetch('/api/images', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: dataUrl, ext }),
+    });
+    if (res.status === 401) { handleSessionLocked(); throw new Error('locked'); }
+    if (!res.ok) throw new Error('Upload failed');
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Upload failed');
+    return json.url;
+  }
+
+  function resizeToDataUrl(file, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---------- image overlay: click → resize / move / delete ----------
+
+  let activeOverlay = null; // { overlay, img, pageEl }
+
+  function wireImageOverlays(pageEl) {
+    if (!pageEl) return;
+    pageEl.querySelectorAll('img').forEach((img) => {
+      // Avoid double-wiring.
+      if (img.dataset.overlayWired) return;
+      img.dataset.overlayWired = '1';
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        showImageOverlay(img, pageEl);
+      });
+      // Prevent the browser's default drag behaviour on images inside
+      // contenteditable — we handle drag-to-move ourselves.
+      img.addEventListener('dragstart', (e) => e.preventDefault());
+    });
+  }
+
+  function showImageOverlay(img, pageEl) {
+    dismissOverlay();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'img-overlay';
+    document.body.appendChild(overlay);
+    activeOverlay = { overlay, img, pageEl };
+
+    positionOverlay(overlay, img);
+
+    // -- Drag handle (move up/down in content) --
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'img-overlay__drag';
+    dragHandle.title = 'Drag to move';
+    dragHandle.textContent = '⠿';
+    overlay.appendChild(dragHandle);
+
+    // -- Delete button --
+    const delBtn = document.createElement('button');
+    delBtn.className = 'img-overlay__delete';
+    delBtn.title = 'Delete image';
+    delBtn.textContent = '🗑';
+    overlay.appendChild(delBtn);
+
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Remove this image?')) return;
+      const src = img.getAttribute('src');
+      img.remove();
+      dismissOverlay();
+      syncSpreadFromDOM();
+      scheduleSave();
+      // Best-effort server-side delete.
+      if (src && src.startsWith('/images/')) {
+        const filename = src.split('/').pop();
+        fetch('/api/images/' + encodeURIComponent(filename), { method: 'DELETE' }).catch(() => {});
+      }
+    });
+
+    // -- 8 resize handles --
+    const HANDLES = [
+      { cls: 'nw', cursor: 'nw-resize', dx: -1, dy: -1 },
+      { cls: 'n',  cursor: 'n-resize',  dx:  0, dy: -1 },
+      { cls: 'ne', cursor: 'ne-resize', dx:  1, dy: -1 },
+      { cls: 'w',  cursor: 'w-resize',  dx: -1, dy:  0 },
+      { cls: 'e',  cursor: 'e-resize',  dx:  1, dy:  0 },
+      { cls: 'sw', cursor: 'sw-resize', dx: -1, dy:  1 },
+      { cls: 's',  cursor: 's-resize',  dx:  0, dy:  1 },
+      { cls: 'se', cursor: 'se-resize', dx:  1, dy:  1 },
+    ];
+
+    HANDLES.forEach(({ cls, cursor, dx, dy }) => {
+      const handle = document.createElement('div');
+      handle.className = 'img-overlay__handle img-overlay__handle--' + cls;
+      handle.style.cursor = cursor;
+      overlay.appendChild(handle);
+
+      let startX, startY, startW, startH;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startX = e.clientX;
+        startY = e.clientY;
+        startW = img.offsetWidth || img.naturalWidth;
+        startH = img.offsetHeight || img.naturalHeight;
+
+        function onMove(ev) {
+          const deltaX = ev.clientX - startX;
+          const deltaY = ev.clientY - startY;
+          if (dx !== 0) {
+            const newW = Math.max(40, startW + dx * deltaX);
+            img.style.width = newW + 'px';
+            img.style.height = 'auto';
+          }
+          if (dy !== 0 && dx === 0) {
+            // Pure vertical: height only
+            const newH = Math.max(40, startH + dy * deltaY);
+            img.style.height = newH + 'px';
+            img.style.width = 'auto';
+          }
+          positionOverlay(overlay, img);
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          syncSpreadFromDOM();
+          scheduleSave();
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+
+    // -- Drag handle: move image up/down in the text flow --
+    let dragStartY, imgClone;
+    dragHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragStartY = e.clientY;
+
+      // Ghost clone
+      imgClone = img.cloneNode();
+      imgClone.style.opacity = '0.45';
+      imgClone.style.pointerEvents = 'none';
+      imgClone.style.position = 'fixed';
+      imgClone.style.zIndex = '9999';
+      imgClone.style.width = img.offsetWidth + 'px';
+      document.body.appendChild(imgClone);
+
+      function onMove(ev) {
+        const rect = img.getBoundingClientRect();
+        imgClone.style.left = rect.left + 'px';
+        imgClone.style.top = (rect.top + ev.clientY - dragStartY) + 'px';
+
+        // Find drop position: element at the pointer inside pageEl
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        if (el && el !== img && pageEl.contains(el)) {
+          const elRect = el.getBoundingClientRect();
+          const midY = elRect.top + elRect.height / 2;
+          if (ev.clientY < midY) {
+            pageEl.insertBefore(img, el);
+          } else {
+            el.after(img);
+          }
+          // Re-wire overlay position after DOM move
+          positionOverlay(overlay, img);
+        }
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (imgClone) { imgClone.remove(); imgClone = null; }
+        positionOverlay(overlay, img);
+        syncSpreadFromDOM();
+        scheduleSave();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // Update overlay position on scroll or resize.
+    const reposition = () => positionOverlay(overlay, img);
+    window.addEventListener('scroll', reposition, { passive: true });
+    window.addEventListener('resize', reposition, { passive: true });
+    overlay._cleanup = () => {
+      window.removeEventListener('scroll', reposition);
+      window.removeEventListener('resize', reposition);
+    };
+  }
+
+  function positionOverlay(overlay, img) {
+    const r = img.getBoundingClientRect();
+    overlay.style.left = (r.left + window.scrollX) + 'px';
+    overlay.style.top = (r.top + window.scrollY) + 'px';
+    overlay.style.width = r.width + 'px';
+    overlay.style.height = r.height + 'px';
+  }
+
+  function dismissOverlay() {
+    if (!activeOverlay) return;
+    if (activeOverlay.overlay._cleanup) activeOverlay.overlay._cleanup();
+    activeOverlay.overlay.remove();
+    activeOverlay = null;
+  }
+
+  // Dismiss overlay when clicking outside an image or overlay.
+  document.addEventListener('mousedown', (e) => {
+    if (!activeOverlay) return;
+    if (activeOverlay.overlay.contains(e.target)) return;
+    if (e.target === activeOverlay.img) return;
+    dismissOverlay();
+  });
+
+  // ---------- live-embed resizer ----------
+  // The ::after pseudo-element at the bottom of .nb-live-embed__frame-wrap
+  // acts as a visual drag handle. We wire up a mousedown on the frame-wrap
+  // itself (near the bottom) to drag-resize the iframe height.
+
+  function wireEmbedResizers(pageEl) {
+    if (!pageEl) return;
+    pageEl.querySelectorAll('.nb-live-embed__frame-wrap').forEach((wrap) => {
+      if (wrap.dataset.resizeWired) return;
+      wrap.dataset.resizeWired = '1';
+
+      wrap.addEventListener('mousedown', (e) => {
+        // Only activate near the bottom 20px (the resize handle zone).
+        const rect = wrap.getBoundingClientRect();
+        if (e.clientY < rect.bottom - 20) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        const startY = e.clientY;
+        const startH = wrap.offsetHeight;
+
+        function onMove(ev) {
+          const newH = Math.max(120, startH + ev.clientY - startY);
+          wrap.style.height = newH + 'px';
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          syncSpreadFromDOM();
+          scheduleSave();
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+
+    // Wire up remove buttons (for embeds inserted via inline onclick, this
+    // ensures save fires after removal).
+    pageEl.querySelectorAll('.nb-live-embed__remove').forEach((btn) => {
+      if (btn.dataset.removeWired) return;
+      btn.dataset.removeWired = '1';
+      btn.addEventListener('click', () => {
+        const embed = btn.closest('.nb-live-embed');
+        if (embed) embed.remove();
+        syncSpreadFromDOM();
+        scheduleSave();
+      });
+    });
+
+    // Wire up reload buttons to refresh the embedded iframe cleanly
+    pageEl.querySelectorAll('.nb-live-embed__reload').forEach((btn) => {
+      if (btn.dataset.reloadWired) return;
+      btn.dataset.reloadWired = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = btn.closest('.nb-live-embed');
+        if (!embed) return;
+        const iframe = embed.querySelector('.nb-live-embed__iframe');
+        const url = embed.dataset.url;
+        if (iframe && url) {
+          iframe.src = '/api/proxy?url=' + encodeURIComponent(url) + '&_t=' + Date.now();
+        }
+      });
+    });
+
+    // Ensure any previously saved embed whose iframe had a broken src gets restored
+    pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
+      const iframe = embed.querySelector('.nb-live-embed__iframe');
+      const url = embed.dataset.url;
+      if (iframe && url && (!iframe.getAttribute('src') || iframe.getAttribute('src').startsWith('/search'))) {
+        iframe.src = '/api/proxy?url=' + encodeURIComponent(url);
+      }
+    });
+  }
+
+  // ---------- live URLs: linkify, embed, preview ----------
+  const BARE_URL_RE = /^https?:\/\/\S+$/i;
+  const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif)(\?[^\s]*)?(#.*)?$/i;
+
+  function classifyUrl(url) {
+    if (IMAGE_EXT_RE.test(url)) return { type: 'image' };
+    let m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{6,})/i);
+    if (m) return { type: 'youtube', id: m[1] };
+    m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+    if (m) return { type: 'vimeo', id: m[1] }; 
+    return { type: 'link' };
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  }
+  function escapeAttr(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  async function buildUrlInsertHTML(url) {
+    const safeUrl = escapeAttr(url);
+    const kind = classifyUrl(url);
+
+    if (kind.type === 'image') {
+      return `<img src="${safeUrl}" alt="">`;
+    }
+    if (kind.type === 'youtube') {
+      return `<div class="nb-embed" contenteditable="false"><iframe src="https://www.youtube.com/embed/${kind.id}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe></div><br>`;
+    }
+    if (kind.type === 'vimeo') {
+      return `<div class="nb-embed" contenteditable="false"><iframe src="https://player.vimeo.com/video/${kind.id}" title="Vimeo video" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div><br>`;
+    }
+
+    // Generic link — embed a LIVE iframe of the actual website, with a
+    // header bar showing title/domain and an "open in new tab" button.
+    let title = url;
+    let domain = '';
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, '');
+      title = domain;
+    } catch (e) { /* ignore */ }
+
+    // Try to fetch a richer title via the server preview API.
+    try {
+      const res = await fetch('/api/link-preview?url=' + encodeURIComponent(url));
+      const data = await res.json();
+      if (data && data.ok) {
+        title = data.title || title;
+        domain = data.domain || domain;
+      }
+    } catch (err) { /* ignore */ }
+
+    return buildLiveEmbedHTML(url, title, domain);
+  }
+
+  /**
+   * Render a live-website embed: a header bar (title + domain + reload + open/remove
+   * buttons) on top, and a full iframe of the real website below it.
+   * The whole block is contenteditable="false" so the editor doesn't try to
+   * put a cursor inside the iframe.
+   */
+  function buildLiveEmbedHTML(url, title, domain) {
+    const safeUrl = escapeAttr(url);
+    const safeTitle = escapeHtml((title || url).slice(0, 120));
+    const safeDomain = escapeHtml(domain || '');
+    // Route the iframe through our server proxy so X-Frame-Options,
+    // CSP, and frame-busting JS are all stripped/neutralised.
+    const proxyUrl = '/api/proxy?url=' + encodeURIComponent(url);
+
+    return (
+      `<div class="nb-live-embed" contenteditable="false" data-url="${safeUrl}">` +
+        `<div class="nb-live-embed__bar">` +
+          `<span class="nb-live-embed__icon">🌐</span>` +
+          `<span class="nb-live-embed__info">` +
+            `<span class="nb-live-embed__title">${safeTitle}</span>` +
+            `<span class="nb-live-embed__domain">${safeDomain}</span>` +
+          `</span>` +
+          `<button class="nb-live-embed__reload" title="Reload website">🔄</button>` +
+          `<a class="nb-live-embed__open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">↗</a>` +
+          `<button class="nb-live-embed__remove" title="Remove embed" onclick="this.closest('.nb-live-embed').remove()">✕</button>` +
+        `</div>` +
+        `<div class="nb-live-embed__frame-wrap">` +
+          `<iframe class="nb-live-embed__iframe" src="${escapeAttr(proxyUrl)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
+        `</div>` +
+      `</div><br>`
+    );
+  }
+
+  async function handlePaste(e, el) {
+    const clipboard = e.clipboardData || window.clipboardData;
+    if (!clipboard) return;
+    const text = clipboard.getData('text/plain');
+    const trimmed = text ? text.trim() : '';
+    if (!trimmed || text.trim() !== text || !BARE_URL_RE.test(trimmed)) return; // only handle a lone URL paste
+    e.preventDefault();
+    activeSlot = el === rightPageEl ? 'right' : 'left';
+    activePageEl = el;
+    const html = await buildUrlInsertHTML(trimmed);
+    document.execCommand('insertHTML', false, html);
+    syncSpreadFromDOM();
+    scheduleSave();
+  }
+
+  // Auto-link a URL you just typed, the moment you hit space/enter after it
+  // — mirrors how most rich text editors behave. Best-effort: any failure
+  // just leaves the plain text alone.
+  function linkifyRecentTyping(el) {
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      if (!el.contains(range.startContainer)) return;
+      const node = range.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) return;
+      if (node.parentElement && node.parentElement.closest('a')) return;
+
+      const text = node.textContent;
+      const before = text.slice(0, range.startOffset);
+      const m = before.match(/(https?:\/\/\S+)(\s)$/i);
+      if (!m) return;
+      const urlText = m[1];
+      const urlStart = before.length - m[0].length;
+
+      const a = document.createElement('a');
+      a.href = urlText;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = urlText;
+
+      const wrapRange = document.createRange();
+      wrapRange.setStart(node, urlStart);
+      wrapRange.setEnd(node, urlStart + urlText.length);
+      wrapRange.deleteContents();
+      wrapRange.insertNode(a);
+
+      const after = document.createRange();
+      after.setStartAfter(a);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    } catch (err) {
+      /* non-critical enhancement — ignore */
+    }
+  }
+
+  linkBtn.addEventListener('click', async () => {
+    activePageEl.focus();
+    restoreSelection();
+    const sel = window.getSelection();
+    const hasSelection = !!(sel && !sel.isCollapsed && activePageEl.contains(sel.anchorNode));
+
+    const url = prompt('Paste or type a URL to insert:');
+    if (!url) return;
+    const trimmed = url.trim();
+    if (!/^https?:\/\//i.test(trimmed)) {
+      alert('Please enter a full URL starting with http:// or https://');
+      return;
+    }
+
+    activePageEl.focus();
+    restoreSelection();
+    if (hasSelection) {
+      document.execCommand('createLink', false, trimmed);
+      try {
+        activePageEl.querySelectorAll(`a[href="${trimmed.replace(/"/g, '\\"')}"]`).forEach((a) => {
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+        });
+      } catch (err) {
+        /* ignore */
+      }
+    } else {
+      const html = await buildUrlInsertHTML(trimmed);
+      document.execCommand('insertHTML', false, html);
+    }
+    syncSpreadFromDOM();
+    scheduleSave();
+  });
+
+  // ---------- title + autosave ----------
+  titleInput.addEventListener('input', () => {
+    notebook.title = titleInput.value;
+    scheduleSave();
+  });
+
+  // If the server's in-memory key gets cleared out from under us — the
+  // process restarted, or the notebook was locked from another tab — every
+  // authenticated call starts 401ing. Rather than leaving the UI stuck,
+  // bounce back to the password screen. Content already on disk is safe;
+  // only unsaved edits since the last autosave could be lost, so we warn.
+  let bounced = false;
+  function handleSessionLocked() {
+    if (bounced) return;
+    bounced = true;
+    clearTimeout(saveTimer);
+    alert('This notebook got locked (often just a server restart). Anything already saved is safe — click OK to unlock again.');
+    window.location.reload();
+  }
+
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveStatus.textContent = 'Editing…';
+    saveStatus.classList.add('saving');
+    saveTimer = setTimeout(saveNotebook, 1200);
+  }
+
+  async function saveNotebook() {
+    syncSpreadFromDOM();
+    saveStatus.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/notebook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notebook }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      if (!res.ok) throw new Error('save failed');
+      saveStatus.textContent = 'Saved';
+      saveStatus.classList.remove('saving');
+    } catch (err) {
+      saveStatus.textContent = 'Save failed — retrying';
+      saveTimer = setTimeout(saveNotebook, 4000);
+    }
+  }
+
+  // ---------- lock / settings ----------
+  lockBtn.addEventListener('click', async () => {
+    await saveNotebook();
+    await fetch('/api/lock', { method: 'POST' });
+    window.location.reload();
+  });
+
+  settingsBtn.addEventListener('click', () => {
+    settingsMsg.textContent = '';
+    newPasswordInput.value = '';
+    newPasswordConfirm.value = '';
+    settingsDrawer.hidden = false;
+  });
+  closeSettingsBtn.addEventListener('click', () => {
+    settingsDrawer.hidden = true;
+  });
+
+  changePasswordBtn.addEventListener('click', async () => {
+    settingsMsg.textContent = '';
+    const pw = newPasswordInput.value;
+    if (pw.length < 4) {
+      settingsMsg.textContent = 'Use at least 4 characters.';
+      return;
+    }
+    if (pw !== newPasswordConfirm.value) {
+      settingsMsg.textContent = 'Passwords do not match.';
+      return;
+    }
+    try {
+      const res = await fetch('/api/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: pw }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!res.ok) {
+        settingsMsg.textContent = data.error || 'Could not change password.';
+        return;
+      }
+      settingsMsg.textContent = 'Password changed.';
+      newPasswordInput.value = '';
+      newPasswordConfirm.value = '';
+    } catch (err) {
+      settingsMsg.textContent = 'Could not reach the server.';
+    }
+  });
+
+  init();
+})();
