@@ -889,7 +889,7 @@
     });
 
     // Wire up reload buttons to refresh the embedded iframe cleanly
-    pageEl.querySelectorAll('.nb-live-embed__reload').forEach((btn) => {
+    pageEl.querySelectorAll('.nb-live-embed__btn--reload').forEach((btn) => {
       if (btn.dataset.reloadWired) return;
       btn.dataset.reloadWired = '1';
       btn.addEventListener('click', (e) => {
@@ -902,6 +902,19 @@
         if (iframe && url) {
           iframe.src = '/api/proxy?url=' + encodeURIComponent(url) + '&_t=' + Date.now();
         }
+      });
+    });
+
+    // Wire up expand/fullscreen toggle buttons
+    pageEl.querySelectorAll('.nb-live-embed__btn--expand').forEach((btn) => {
+      if (btn.dataset.expandWired) return;
+      btn.dataset.expandWired = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = btn.closest('.nb-live-embed');
+        if (!embed) return;
+        embed.classList.toggle('nb-live-embed--expanded');
       });
     });
 
@@ -972,17 +985,13 @@
   }
 
   /**
-   * Render a live-website embed: a header bar (title + domain + reload + open/remove
+   * Render a live-website embed: a header bar (title + domain + reload + expand + open/remove
    * buttons) on top, and a full iframe of the real website below it.
-   * The whole block is contenteditable="false" so the editor doesn't try to
-   * put a cursor inside the iframe.
    */
   function buildLiveEmbedHTML(url, title, domain) {
     const safeUrl = escapeAttr(url);
     const safeTitle = escapeHtml((title || url).slice(0, 120));
     const safeDomain = escapeHtml(domain || '');
-    // Route the iframe through our server proxy so X-Frame-Options,
-    // CSP, and frame-busting JS are all stripped/neutralised.
     const proxyUrl = '/api/proxy?url=' + encodeURIComponent(url);
 
     return (
@@ -993,9 +1002,18 @@
             `<span class="nb-live-embed__title">${safeTitle}</span>` +
             `<span class="nb-live-embed__domain">${safeDomain}</span>` +
           `</span>` +
-          `<button class="nb-live-embed__reload" title="Reload website">🔄</button>` +
-          `<a class="nb-live-embed__open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">↗</a>` +
-          `<button class="nb-live-embed__remove" title="Remove embed" onclick="this.closest('.nb-live-embed').remove()">✕</button>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--reload" title="Reload website">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>` +
+          `</button>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--expand" title="Expand / Fullscreen">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>` +
+          `</button>` +
+          `<a class="nb-live-embed__btn nb-live-embed__btn--open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` +
+          `</a>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed" onclick="this.closest('.nb-live-embed').remove()">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
+          `</button>` +
         `</div>` +
         `<div class="nb-live-embed__frame-wrap">` +
           `<iframe class="nb-live-embed__iframe" src="${escapeAttr(proxyUrl)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
