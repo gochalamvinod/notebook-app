@@ -42,7 +42,13 @@
   <section id="app" class="app" hidden>
 
     <header class="toolbar">
-      <input id="titleInput" class="title-input" spellcheck="false" />
+      <div class="bookshelf-wrapper">
+        <button type="button" id="bookshelfBtn" class="bookshelf-trigger-btn" title="Bookshelf / Switch Books">
+          <span class="bookshelf-book-icon">📚</span>
+          <span id="currentBookTitle" class="current-book-title">My Notebook</span>
+          <span class="bookshelf-caret">▾</span>
+        </button>
+      </div>
 
       <div class="tool-group">
         <select id="fontSelect" title="Font"></select>
@@ -71,7 +77,7 @@
           <input type="color" id="highlightInput" value="#f6e27a" />
         </label>
         <button type="button" id="imageBtn" class="icon-btn" title="Insert image from file">🖼</button>
-        <button type="button" id="linkBtn" class="icon-btn" title="Insert a live link (paste a URL and I'll try to preview it)">🔗</button>
+        <button type="button" id="linkBtn" class="icon-btn" title="Insert a live link">🔗</button>
       </div>
 
       <div class="tool-group right">
@@ -126,6 +132,75 @@
         <button type="button" id="deletePageBtn" class="brass-link danger">Delete page</button>
       </div>
     </main>
+
+    <!-- ============ BOOKSHELF MODAL ============ -->
+    <div id="bookshelfModal" class="modal-overlay" hidden>
+      <div class="modal-backdrop" id="bookshelfBackdrop"></div>
+      <div class="bookshelf-card">
+        <div class="modal-header">
+          <h2>📚 Your Library</h2>
+          <button type="button" id="closeBookshelfBtn" class="modal-close-btn" title="Close">✕</button>
+        </div>
+        <p class="modal-subtitle">Switch between your private leatherbound notebooks or create a new one.</p>
+        
+        <div class="bookshelf-grid" id="bookshelfGrid">
+          <!-- Dynamically populated books -->
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="openNewBookModalBtn" class="brass-btn">+ New Notebook</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ NEW BOOK MODAL ============ -->
+    <div id="newBookModal" class="modal-overlay" hidden>
+      <div class="modal-backdrop" id="newBookBackdrop"></div>
+      <div class="new-book-card">
+        <div class="modal-header">
+          <h2>Create New Notebook</h2>
+          <button type="button" id="closeNewBookBtn" class="modal-close-btn" title="Close">✕</button>
+        </div>
+        
+        <form id="newBookForm" class="new-book-form">
+          <label class="field">
+            <span>Notebook Title</span>
+            <input type="text" id="newBookTitleInput" placeholder="e.g. Work Journal, Research, Diary" required maxlength="80" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span>Leather Cover Style</span>
+            <div class="cover-color-palette">
+              <label class="color-choice">
+                <input type="radio" name="coverColor" value="brown" checked />
+                <span class="cover-chip chip-brown">Classic Brown</span>
+              </label>
+              <label class="color-choice">
+                <input type="radio" name="coverColor" value="green" />
+                <span class="cover-chip chip-green">Emerald Pine</span>
+              </label>
+              <label class="color-choice">
+                <input type="radio" name="coverColor" value="navy" />
+                <span class="cover-chip chip-navy">Midnight Navy</span>
+              </label>
+              <label class="color-choice">
+                <input type="radio" name="coverColor" value="burgundy" />
+                <span class="cover-chip chip-burgundy">Royal Burgundy</span>
+              </label>
+              <label class="color-choice">
+                <input type="radio" name="coverColor" value="black" />
+                <span class="cover-chip chip-black">Obsidian Noir</span>
+              </label>
+            </div>
+          </label>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelNewBookBtn" class="cancel-btn">Cancel</button>
+            <button type="submit" class="brass-btn">Create Notebook</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- ============ SETTINGS DRAWER ============ -->
     <div id="settingsDrawer" class="settings-drawer" hidden>

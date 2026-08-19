@@ -25,6 +25,21 @@
   const clasp = document.getElementById('clasp');
 
   const appEl = document.getElementById('app');
+  const bookshelfBtn = document.getElementById('bookshelfBtn');
+  const currentBookTitle = document.getElementById('currentBookTitle');
+  const bookshelfModal = document.getElementById('bookshelfModal');
+  const bookshelfBackdrop = document.getElementById('bookshelfBackdrop');
+  const closeBookshelfBtn = document.getElementById('closeBookshelfBtn');
+  const bookshelfGrid = document.getElementById('bookshelfGrid');
+  const openNewBookModalBtn = document.getElementById('openNewBookModalBtn');
+
+  const newBookModal = document.getElementById('newBookModal');
+  const newBookBackdrop = document.getElementById('newBookBackdrop');
+  const closeNewBookBtn = document.getElementById('closeNewBookBtn');
+  const newBookForm = document.getElementById('newBookForm');
+  const newBookTitleInput = document.getElementById('newBookTitleInput');
+  const cancelNewBookBtn = document.getElementById('cancelNewBookBtn');
+
   const titleInput = document.getElementById('titleInput');
   const fontSelect = document.getElementById('fontSelect');
   const sizeSelect = document.getElementById('sizeSelect');
@@ -85,6 +100,7 @@
 
   // ---------- state ----------
   let notebook = null;
+  let vault = null;
   let leftIndex = 0;       // index of the page shown in the LEFT slot; always even
   let activeSlot = 'left'; // 'left' | 'right' — whichever page last had focus
   let activePageEl = null;
@@ -96,14 +112,15 @@
   // ---------- init ----------
   async function init() {
     populateControls();
+    wireBookshelf();
     try {
       const res = await fetch('/api/status');
       const status = await res.json();
 
       if (status.unlocked) {
-        const nb = await fetch('/api/notebook').then((r) => r.json());
-        if (nb.ok) {
-          bootFromNotebook(nb.notebook);
+        const nbRes = await fetch('/api/notebook').then((r) => r.json());
+        if (nbRes.ok) {
+          bootFromNotebook(nbRes.notebook, nbRes.vault);
           return;
         }
       }
@@ -141,6 +158,215 @@
       opt.textContent = s.replace('px', '');
       sizeSelect.appendChild(opt);
     });
+  }
+
+  // ---------- bookshelf & multiple books ----------
+  function applyCoverTheme(theme) {
+    document.body.dataset.cover = theme || 'brown';
+  }
+
+  function wireBookshelf() {
+    if (bookshelfBtn) {
+      bookshelfBtn.addEventListener('click', openBookshelf);
+    }
+    if (closeBookshelfBtn) {
+      closeBookshelfBtn.addEventListener('click', closeBookshelf);
+    }
+    if (bookshelfBackdrop) {
+      bookshelfBackdrop.addEventListener('click', closeBookshelf);
+    }
+    if (openNewBookModalBtn) {
+      openNewBookModalBtn.addEventListener('click', () => {
+        closeBookshelf();
+        openNewBook();
+      });
+    }
+    if (closeNewBookBtn) {
+      closeNewBookBtn.addEventListener('click', closeNewBook);
+    }
+    if (newBookBackdrop) {
+      newBookBackdrop.addEventListener('click', closeNewBook);
+    }
+    if (cancelNewBookBtn) {
+      cancelNewBookBtn.addEventListener('click', closeNewBook);
+    }
+    if (newBookForm) {
+      newBookForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = newBookTitleInput.value.trim();
+        if (!title) return;
+        const colorRadio = newBookForm.querySelector('input[name="coverColor"]:checked');
+        const coverColor = colorRadio ? colorRadio.value : 'brown';
+        await createNewBook(title, coverColor);
+      });
+    }
+  }
+
+  async function openBookshelf() {
+    if (bookshelfModal) bookshelfModal.hidden = false;
+    await refreshBookshelfGrid();
+  }
+
+  function closeBookshelf() {
+    if (bookshelfModal) bookshelfModal.hidden = true;
+  }
+
+  function openNewBook() {
+    if (newBookTitleInput) newBookTitleInput.value = '';
+    if (newBookModal) newBookModal.hidden = false;
+    if (newBookTitleInput) newBookTitleInput.focus();
+  }
+
+  function closeNewBook() {
+    if (newBookModal) newBookModal.hidden = true;
+  }
+
+  async function refreshBookshelfGrid() {
+    if (!bookshelfGrid) return;
+    bookshelfGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: rgba(244,237,222,0.6); padding: 20px;">Loading library...</div>';
+    try {
+      const res = await fetch('/api/books');
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+
+      bookshelfGrid.innerHTML = '';
+      data.books.forEach((b) => {
+        const item = document.createElement('div');
+        const isActive = (b.id === (notebook && notebook.id)) || (b.id === data.activeBookId);
+        item.className = 'book-card-item' + (isActive ? ' book-card-item--active' : '');
+
+        const colorClass = 'spine-' + (b.coverColor || 'brown');
+        const pageCountStr = b.pageCount + (b.pageCount === 1 ? ' page' : ' pages');
+        const updatedStr = b.updatedAt ? new Date(b.updatedAt).toLocaleDateString() : '';
+
+        item.innerHTML = `
+          <div class="book-card-header">
+            <div class="book-card-spine ${colorClass}"></div>
+            <div class="book-card-info">
+              <h4 class="book-card-title">${escapeHtml(b.title)}</h4>
+              <div class="book-card-meta">${pageCountStr} · ${updatedStr}</div>
+            </div>
+            ${isActive ? '<span class="book-card-badge">Active</span>' : ''}
+          </div>
+          <div class="book-card-footer">
+            <button type="button" class="book-action-btn book-action-btn--rename" title="Rename notebook">✏ Rename</button>
+            ${data.books.length > 1 ? '<button type="button" class="book-action-btn book-action-btn--delete" title="Delete notebook">🗑 Delete</button>' : ''}
+          </div>
+        `;
+
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.book-action-btn')) return;
+          if (isActive) {
+            closeBookshelf();
+            return;
+          }
+          switchBook(b.id);
+        });
+
+        const renameBtn = item.querySelector('.book-action-btn--rename');
+        if (renameBtn) {
+          renameBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            renameBook(b.id, b.title);
+          });
+        }
+
+        const deleteBtn = item.querySelector('.book-action-btn--delete');
+        if (deleteBtn) {
+          deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteBook(b.id, b.title);
+          });
+        }
+
+        bookshelfGrid.appendChild(item);
+      });
+    } catch (err) {
+      bookshelfGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--danger-bright); padding: 20px;">Could not load bookshelf.</div>';
+    }
+  }
+
+  async function switchBook(bookId) {
+    await saveNotebook();
+    try {
+      const res = await fetch('/api/books/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+
+      closeBookshelf();
+      bootFromNotebook(data.notebook, data.vault);
+    } catch (err) {
+      alert('Could not switch notebook: ' + err.message);
+    }
+  }
+
+  async function createNewBook(title, coverColor) {
+    await saveNotebook();
+    try {
+      const res = await fetch('/api/books/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, coverColor }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+
+      closeNewBook();
+      closeBookshelf();
+      bootFromNotebook(data.notebook, data.vault);
+    } catch (err) {
+      alert('Could not create notebook: ' + err.message);
+    }
+  }
+
+  async function renameBook(bookId, oldTitle) {
+    const newTitle = prompt('Enter new title for this notebook:', oldTitle);
+    if (!newTitle || newTitle.trim() === oldTitle) return;
+    try {
+      const res = await fetch('/api/books/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId, title: newTitle.trim() }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+
+      if (notebook && notebook.id === bookId) {
+        notebook.title = newTitle.trim();
+        if (currentBookTitle) currentBookTitle.textContent = notebook.title;
+        if (titleInput) titleInput.value = notebook.title;
+      }
+      await refreshBookshelfGrid();
+    } catch (err) {
+      alert('Could not rename notebook: ' + err.message);
+    }
+  }
+
+  async function deleteBook(bookId, title) {
+    if (!confirm(`Are you sure you want to delete "${title}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch('/api/books/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId }),
+      });
+      if (res.status === 401) return handleSessionLocked();
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+
+      bootFromNotebook(data.notebook, data.vault);
+      await refreshBookshelfGrid();
+    } catch (err) {
+      alert('Could not delete notebook: ' + err.message);
+    }
   }
 
   // ---------- lock screen ----------
@@ -183,7 +409,7 @@
       }
       clasp.classList.add('open');
       await new Promise((r) => setTimeout(r, 450));
-      bootFromNotebook(data.notebook);
+      bootFromNotebook(data.notebook, data.vault);
     } catch (err) {
       lockError.textContent = 'Could not reach the server.';
       lockSubmit.disabled = false;
@@ -197,14 +423,17 @@
   }
 
   // ---------- boot main app ----------
-  function bootFromNotebook(nb) {
+  function bootFromNotebook(nb, vaultData) {
     notebook = nb;
+    if (vaultData) vault = vaultData;
     leftIndex = 0;
     activeSlot = 'left';
     activePageEl = leftPageEl;
     lockScreen.hidden = true;
     appEl.hidden = false;
-    titleInput.value = notebook.title || 'My Notebook';
+    if (currentBookTitle) currentBookTitle.textContent = notebook.title || 'My Notebook';
+    if (titleInput) titleInput.value = notebook.title || 'My Notebook';
+    applyCoverTheme(notebook.coverColor);
 
     setupPageEditable(leftPageEl, 'left');
     setupPageEditable(rightPageEl, 'right');
@@ -1114,10 +1343,13 @@
   });
 
   // ---------- title + autosave ----------
-  titleInput.addEventListener('input', () => {
-    notebook.title = titleInput.value;
-    scheduleSave();
-  });
+  if (titleInput) {
+    titleInput.addEventListener('input', () => {
+      if (notebook) notebook.title = titleInput.value;
+      if (currentBookTitle) currentBookTitle.textContent = titleInput.value;
+      scheduleSave();
+    });
+  }
 
   // If the server's in-memory key gets cleared out from under us — the
   // process restarted, or the notebook was locked from another tab — every
