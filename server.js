@@ -43,8 +43,7 @@ try {
   if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 } catch (e) {}
 
-// Held only in memory for the lifetime of this process. Restarting the
-// server always forgets it, so the notebook re-locks on every restart.
+// Held in memory for the lifetime of this process.
 let sessionKey = null;
 
 // ---------- crypto helpers ----------
@@ -80,15 +79,103 @@ function decryptData(payload, key) {
   return JSON.parse(plaintext.toString('utf8'));
 }
 
-function emptyNotebook() {
-  return {
+// ---------- Session Token Helper for Serverless Persistence ----------
+function getSessionSecret() {
+  let salt = 'default-leatherbound-salt';
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      salt = readFile().salt || salt;
+    }
+  } catch (e) {}
+  return crypto.createHash('sha256').update(salt + '-vault-session-key-secret').digest();
+}
+
+function encryptSessionToken(key) {
+  const secret = getSessionSecret();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', secret, iv);
+  const encrypted = Buffer.concat([cipher.update(key), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return iv.toString('hex') + '.' + authTag.toString('hex') + '.' + encrypted.toString('hex');
+}
+
+function decryptSessionToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const secret = getSessionSecret();
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = Buffer.from(parts[2], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', secret, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getSessionKey(req) {
+  if (sessionKey) return sessionKey;
+  const cookieHeader = req.headers.cookie || '';
+  const match = cookieHeader.match(/(?:^|; )notebook_session=([^;]*)/);
+  if (match) {
+    const key = decryptSessionToken(decodeURIComponent(match[1]));
+    if (key) {
+      sessionKey = key;
+      return key;
+    }
+  }
+  return null;
+}
+
+// ---------- Multi-Book Vault Structure & Normalization ----------
+
+function emptyVault() {
+  const initialBook = {
+    id: 'book-' + Date.now(),
     title: 'My Notebook',
+    coverColor: 'brown',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     pages: [
       { id: 'p-' + Date.now(), font: "Georgia, 'Times New Roman', serif", fontSize: '18px', html: '' },
     ],
   };
+  return {
+    version: 2,
+    activeBookId: initialBook.id,
+    books: [initialBook],
+  };
+}
+
+function normalizeVault(data) {
+  if (data && Array.isArray(data.books) && data.books.length > 0) {
+    if (!data.activeBookId || !data.books.some((b) => b.id === data.activeBookId)) {
+      data.activeBookId = data.books[0].id;
+    }
+    return data;
+  }
+  const defaultBook = {
+    id: 'book-default',
+    title: (data && data.title) || 'My Notebook',
+    coverColor: (data && data.coverColor) || 'brown',
+    createdAt: (data && data.createdAt) || new Date().toISOString(),
+    updatedAt: (data && data.updatedAt) || new Date().toISOString(),
+    pages: (data && data.pages) || [
+      { id: 'p-' + Date.now(), font: "Georgia, 'Times New Roman', serif", fontSize: '18px', html: '' },
+    ],
+  };
+  return {
+    version: 2,
+    activeBookId: defaultBook.id,
+    books: [defaultBook],
+  };
+}
+
+function getActiveBook(vault) {
+  return vault.books.find((b) => b.id === vault.activeBookId) || vault.books[0];
 }
 
 function readFile() {
@@ -96,42 +183,49 @@ function readFile() {
 }
 
 function writeFile(salt, encrypted) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ version: 1, salt, ...encrypted }));
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ version: 2, salt, ...encrypted }));
 }
 
 // ---------- base64 image migration ----------
-// When a notebook that was created before file-based images is unlocked,
-// we scan each page's HTML for data:image/... src attributes, extract them,
-// save them as files, and rewrite the HTML. This happens once on unlock.
-
 const BASE64_IMG_RE = /<img([^>]*)\ssrc="(data:image\/([a-z+]+);base64,[^"]+)"([^>]*)>/gi;
 
-function migrateBase64Images(notebook) {
+function migrateBase64Images(vault) {
   let changed = false;
-  for (const page of notebook.pages) {
-    if (!page.html || !page.html.includes('data:image/')) continue;
-    page.html = page.html.replace(BASE64_IMG_RE, (match, before, dataUrl, ext, after) => {
-      try {
-        const safeExt = ext.replace(/[^a-z0-9]/g, '').slice(0, 8) || 'jpg';
-        const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
-        const filename = id + '.' + safeExt;
-        const base64Data = dataUrl.split(',')[1];
-        fs.writeFileSync(path.join(IMAGES_DIR, filename), Buffer.from(base64Data, 'base64'));
-        changed = true;
-        return `<img${before} src="/images/${filename}"${after}>`;
-      } catch (err) {
-        // Leave as-is if extraction fails.
-        return match;
-      }
-    });
+  if (!vault || !vault.books) return false;
+  for (const book of vault.books) {
+    if (!book.pages) continue;
+    for (const page of book.pages) {
+      if (!page.html || !page.html.includes('data:image/')) continue;
+      page.html = page.html.replace(BASE64_IMG_RE, (match, before, dataUrl, ext, after) => {
+        try {
+          const safeExt = ext.replace(/[^a-z0-9]/g, '').slice(0, 8) || 'jpg';
+          const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+          const filename = id + '.' + safeExt;
+          const base64Data = dataUrl.split(',')[1];
+          fs.writeFileSync(path.join(IMAGES_DIR, filename), Buffer.from(base64Data, 'base64'));
+          changed = true;
+          return `<img${before} src="/images/${filename}"${after}>`;
+        } catch (err) {
+          return match;
+        }
+      });
+    }
   }
   return changed;
 }
 
 // ---------- routes ----------
 
+function requireUnlocked(req, res, next) {
+  const key = getSessionKey(req);
+  if (!key) return res.status(401).json({ error: 'Notebook is locked.' });
+  req.sessionKey = key;
+  next();
+}
+
 app.get('/api/status', (req, res) => {
-  res.json({ setupNeeded: !fs.existsSync(DATA_FILE), unlocked: !!sessionKey });
+  const key = getSessionKey(req);
+  res.json({ setupNeeded: !fs.existsSync(DATA_FILE), unlocked: !!key });
 });
 
 app.post('/api/setup', (req, res) => {
@@ -144,10 +238,13 @@ app.post('/api/setup', (req, res) => {
   }
   const salt = crypto.randomBytes(16).toString('hex');
   const key = deriveKey(password, salt);
-  const notebook = emptyNotebook();
-  writeFile(salt, encryptData(notebook, key));
+  const vault = emptyVault();
+  writeFile(salt, encryptData(vault, key));
   sessionKey = key;
-  res.json({ ok: true, notebook });
+
+  const token = encryptSessionToken(key);
+  res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+  res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
 });
 
 app.post('/api/unlock', (req, res) => {
@@ -158,15 +255,18 @@ app.post('/api/unlock', (req, res) => {
   try {
     const file = readFile();
     const key = deriveKey(password || '', file.salt);
-    let notebook = decryptData(file, key);
+    let raw = decryptData(file, key);
+    let vault = normalizeVault(raw);
     sessionKey = key;
 
     // One-time migration: extract any base64 images → data/images/ files.
-    if (migrateBase64Images(notebook)) {
-      writeFile(file.salt, encryptData(notebook, key));
+    if (migrateBase64Images(vault)) {
+      writeFile(file.salt, encryptData(vault, key));
     }
 
-    res.json({ ok: true, notebook });
+    const token = encryptSessionToken(key);
+    res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(401).json({ error: 'Incorrect password.' });
   }
@@ -174,18 +274,15 @@ app.post('/api/unlock', (req, res) => {
 
 app.post('/api/lock', (req, res) => {
   sessionKey = null;
+  res.set('Set-Cookie', `notebook_session=; Path=/; HttpOnly; Max-Age=0`);
   res.json({ ok: true });
 });
 
-function requireUnlocked(req, res, next) {
-  if (!sessionKey) return res.status(401).json({ error: 'Notebook is locked.' });
-  next();
-}
-
 app.get('/api/notebook', requireUnlocked, (req, res) => {
   try {
-    const notebook = decryptData(readFile(), sessionKey);
-    res.json({ ok: true, notebook });
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not read the notebook file.' });
   }
@@ -193,13 +290,138 @@ app.get('/api/notebook', requireUnlocked, (req, res) => {
 
 app.post('/api/notebook', requireUnlocked, (req, res) => {
   try {
-    const notebook = req.body.notebook;
-    notebook.updatedAt = new Date().toISOString();
+    const raw = decryptData(readFile(), req.sessionKey);
+    let vault = normalizeVault(raw);
+
+    if (req.body.vault) {
+      vault = normalizeVault(req.body.vault);
+    } else if (req.body.notebook) {
+      const updated = req.body.notebook;
+      updated.updatedAt = new Date().toISOString();
+      const idx = vault.books.findIndex((b) => b.id === (updated.id || vault.activeBookId));
+      if (idx !== -1) {
+        vault.books[idx] = updated;
+      } else {
+        vault.books.push(updated);
+      }
+    }
+
     const file = readFile();
-    writeFile(file.salt, encryptData(notebook, sessionKey));
-    res.json({ ok: true, updatedAt: notebook.updatedAt });
+    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    const active = getActiveBook(vault);
+    res.json({ ok: true, updatedAt: active.updatedAt, vault, notebook: active });
   } catch (err) {
     res.status(500).json({ error: 'Could not save the notebook.' });
+  }
+});
+
+// ---------- Multiple Books Management Routes ----------
+
+app.get('/api/books', requireUnlocked, (req, res) => {
+  try {
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+    const summary = vault.books.map((b) => ({
+      id: b.id,
+      title: b.title,
+      coverColor: b.coverColor || 'brown',
+      pageCount: (b.pages || []).length,
+      updatedAt: b.updatedAt,
+    }));
+    res.json({ ok: true, activeBookId: vault.activeBookId, books: summary });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not fetch books list.' });
+  }
+});
+
+app.post('/api/books/create', requireUnlocked, (req, res) => {
+  try {
+    const { title, coverColor } = req.body || {};
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+
+    const newBook = {
+      id: 'book-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+      title: (title || 'New Notebook').trim().slice(0, 80) || 'New Notebook',
+      coverColor: coverColor || 'brown',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pages: [
+        { id: 'p-' + Date.now(), font: "Georgia, 'Times New Roman', serif", fontSize: '18px', html: '' },
+      ],
+    };
+
+    vault.books.push(newBook);
+    vault.activeBookId = newBook.id;
+
+    const file = readFile();
+    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    res.json({ ok: true, vault, activeBookId: newBook.id, notebook: newBook });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not create book.' });
+  }
+});
+
+app.post('/api/books/switch', requireUnlocked, (req, res) => {
+  try {
+    const { bookId } = req.body || {};
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+
+    if (!vault.books.some((b) => b.id === bookId)) {
+      return res.status(404).json({ error: 'Book not found.' });
+    }
+
+    vault.activeBookId = bookId;
+    const file = readFile();
+    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    res.json({ ok: true, vault, activeBookId: bookId, notebook: getActiveBook(vault) });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not switch book.' });
+  }
+});
+
+app.post('/api/books/delete', requireUnlocked, (req, res) => {
+  try {
+    const { bookId } = req.body || {};
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+
+    if (vault.books.length <= 1) {
+      return res.status(400).json({ error: 'You must have at least one notebook.' });
+    }
+
+    vault.books = vault.books.filter((b) => b.id !== bookId);
+    if (vault.activeBookId === bookId) {
+      vault.activeBookId = vault.books[0].id;
+    }
+
+    const file = readFile();
+    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not delete book.' });
+  }
+});
+
+app.post('/api/books/rename', requireUnlocked, (req, res) => {
+  try {
+    const { bookId, title, coverColor } = req.body || {};
+    const raw = decryptData(readFile(), req.sessionKey);
+    const vault = normalizeVault(raw);
+
+    const target = vault.books.find((b) => b.id === bookId);
+    if (!target) return res.status(404).json({ error: 'Book not found.' });
+
+    if (title) target.title = title.trim().slice(0, 80);
+    if (coverColor) target.coverColor = coverColor;
+    target.updatedAt = new Date().toISOString();
+
+    const file = readFile();
+    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not update book.' });
   }
 });
 
@@ -209,11 +431,14 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
     if (!newPassword || newPassword.length < 4) {
       return res.status(400).json({ error: 'Choose a password with at least 4 characters.' });
     }
-    const notebook = decryptData(readFile(), sessionKey);
+    const vault = normalizeVault(decryptData(readFile(), req.sessionKey));
     const newSalt = crypto.randomBytes(16).toString('hex');
     const newKey = deriveKey(newPassword, newSalt);
-    writeFile(newSalt, encryptData(notebook, newKey));
+    writeFile(newSalt, encryptData(vault, newKey));
     sessionKey = newKey;
+
+    const token = encryptSessionToken(newKey);
+    res.set('Set-Cookie', `notebook_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Could not change the password.' });
