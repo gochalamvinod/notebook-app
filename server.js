@@ -29,7 +29,8 @@ const { URL } = require('url');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
+const isVercel = !!process.env.VERCEL;
+const DATA_DIR = isVercel ? path.join('/tmp', 'data') : path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'notebook.enc.json');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
@@ -37,8 +38,10 @@ const IMAGES_DIR = path.join(DATA_DIR, 'images');
 app.use(express.json({ limit: '75mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+} catch (e) {}
 
 // Held only in memory for the lifetime of this process. Restarting the
 // server always forgets it, so the notebook re-locks on every restart.
@@ -420,6 +423,7 @@ const BLOCKED_HEADERS = new Set([
  */
 function buildInjection(baseHref, targetOrigin) {
   return (
+    `<meta name="viewport" content="width=device-width, initial-scale=1.0">` +
     `<base href="${baseHref}">` +
     `<script>` +
     `(function(){` +
@@ -813,15 +817,19 @@ app.use((req, res, next) => {
   next();
 });
 
-app.listen(PORT, () => {
-  console.log('');
-  console.log('  📖  Leatherbound Notebook is running.');
-  console.log(`      Open http://localhost:${PORT} in your browser.`);
-  console.log('');
-  console.log(`      Images folder: ${IMAGES_DIR}`);
-  console.log(`      Proxy: STREAMING + API Hook mode (full SPA support).`);
-  console.log('');
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('  📖  Leatherbound Notebook is running.');
+    console.log(`      Open http://localhost:${PORT} in your browser.`);
+    console.log('');
+    console.log(`      Images folder: ${IMAGES_DIR}`);
+    console.log(`      Proxy: STREAMING + API Hook mode (full SPA support).`);
+    console.log('');
+  });
+}
+
+module.exports = app;
 
 
 
