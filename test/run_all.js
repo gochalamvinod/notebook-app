@@ -117,6 +117,7 @@ async function main() {
     } else {
       console.log(`\x1b[31mFAIL\x1b[0m (${result.failed} failed out of ${result.totalTests})`);
       allPassed = false;
+      if (result.stdout) console.log(result.stdout);
       if (result.stderr) console.error(result.stderr);
     }
   }

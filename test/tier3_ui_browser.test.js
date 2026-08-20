@@ -133,6 +133,30 @@ function buildDirectVideoEmbedHTML(url, title) {
   );
 }
 
+function buildPreviewCardHTML(url, title, desc, image, domain) {
+  const safeUrl = escapeAttr(url);
+  const safeTitle = escapeHtml(title || url);
+  const safeDesc = escapeHtml(desc || '');
+  const safeDomain = escapeHtml(domain || '');
+
+  const thumbHtml = image
+    ? `<img class="nb-link-card__thumb" src="${escapeAttr(image)}" alt="">`
+    : `<span class="nb-link-card__thumb--placeholder">📰</span>`;
+  const descHtml = safeDesc ? `<div class="nb-link-card__desc">${safeDesc}</div>` : '';
+
+  return (
+    `<a class="nb-link-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer" contenteditable="false">` +
+      thumbHtml +
+      `<div class="nb-link-card__body">` +
+        `<div class="nb-link-card__title">${safeTitle}</div>` +
+        descHtml +
+        `<div class="nb-link-card__domain">${safeDomain} <span class="nb-link-card__domain-dot">•</span> Preview Card</div>` +
+      `</div>` +
+      `<span class="nb-link-card__arrow">↗</span>` +
+    `</a><br>`
+  );
+}
+
 // 8-handle image resize calculation helper matching app.js
 function calculateImageResize(handle, startW, startH, deltaX, deltaY) {
   let w = startW;
@@ -288,6 +312,25 @@ describe('Tier 3: UI & Browser Logic Tests', () => {
       assert.ok(!html.includes('x=" onload="'));
       assert.ok(html.includes('&quot; onload=&quot;'));
     });
+
+    test('generates rich link preview cards with OpenGraph metadata (Method 7)', () => {
+      const url = 'https://example.com/article';
+      const html = buildPreviewCardHTML(
+        url,
+        'Deep Dive into Web Architecture',
+        'A comprehensive guide to web performance and embeds.',
+        'https://example.com/thumb.png',
+        'example.com'
+      );
+
+      assert.ok(html.includes('class="nb-link-card"'));
+      assert.ok(html.includes('href="https://example.com/article"'));
+      assert.ok(html.includes('src="https://example.com/thumb.png"'));
+      assert.ok(html.includes('Deep Dive into Web Architecture'));
+      assert.ok(html.includes('A comprehensive guide to web performance and embeds.'));
+      assert.ok(html.includes('example.com'));
+      assert.ok(html.includes('Preview Card'));
+    });
   });
 
   describe('5 Leather Cover Themes & Visual Styling', () => {
@@ -394,6 +437,36 @@ describe('Tier 3: UI & Browser Logic Tests', () => {
     test('Corner Southeast (SE) handle updates width correctly', () => {
       const result = calculateImageResize(handles.se, 300, 200, 60, 40);
       assert.equal(result.width, 360);
+    });
+
+    test('Corner Northwest (NW), Northeast (NE), Southwest (SW) handles resize width correctly', () => {
+      // NW: dx = -1
+      const nwResult = calculateImageResize(handles.nw, 300, 200, 50, 50);
+      assert.equal(nwResult.width, 250);
+
+      // NE: dx = 1
+      const neResult = calculateImageResize(handles.ne, 300, 200, 50, 50);
+      assert.equal(neResult.width, 350);
+
+      // SW: dx = -1
+      const swResult = calculateImageResize(handles.sw, 300, 200, 50, 50);
+      assert.equal(swResult.width, 250);
+    });
+
+    test('verifies all 8 handles, drag handle, and delete button CSS classes in style.css', () => {
+      const cssPath = path.resolve(__dirname, '..', 'public', 'style.css');
+      const css = fs.readFileSync(cssPath, 'utf8');
+
+      // 8 handles
+      const handleClasses = ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se'];
+      for (const h of handleClasses) {
+        assert.ok(css.includes(`.img-overlay__handle--${h}`), `Handle class .img-overlay__handle--${h} must exist in style.css`);
+      }
+
+      // Drag and delete controls
+      assert.ok(css.includes('.img-overlay__drag'), '.img-overlay__drag must exist in style.css');
+      assert.ok(css.includes('.img-overlay__delete'), '.img-overlay__delete must exist in style.css');
+      assert.ok(css.includes('.img-overlay'), '.img-overlay base class must exist in style.css');
     });
 
     test('Embed container height resize calculates and enforces min-height (120px)', () => {

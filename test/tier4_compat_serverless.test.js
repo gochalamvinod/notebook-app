@@ -576,4 +576,229 @@ describe('Tier 4: Compatibility & Serverless Tests', () => {
     });
   });
 
+  describe('Public vs Gated Route Matrix Enforcement', () => {
+    let server;
+    let sessionCookie;
+    const password = 'MatrixGuardPass2026!';
+
+    before(async () => {
+      server = await spawnTestServer();
+      const setupRes = await fetch(`${server.baseUrl}/api/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      sessionCookie = extractCookie(setupRes);
+    });
+
+    after(async () => {
+      if (server) await server.stop();
+    });
+
+    test('public unauthenticated endpoints are accessible without session cookie', async () => {
+      // GET /api/status -> 200
+      const statusRes = await fetch(`${server.baseUrl}/api/status`);
+      assert.equal(statusRes.status, 200);
+
+      // GET /api/search -> 200
+      const searchRes = await fetch(`${server.baseUrl}/api/search?q=test`);
+      assert.equal(searchRes.status, 200);
+
+      // GET /api/proxy without url -> 400 (not 401)
+      const proxyRes = await fetch(`${server.baseUrl}/api/proxy`);
+      assert.equal(proxyRes.status, 400);
+
+      // GET /api/proxy-api without url -> 400 (not 401)
+      const proxyApiRes = await fetch(`${server.baseUrl}/api/proxy-api`);
+      assert.equal(proxyApiRes.status, 400);
+
+      // GET /api/proxy-asset without url -> 400 (not 401)
+      const proxyAssetRes = await fetch(`${server.baseUrl}/api/proxy-asset`);
+      assert.equal(proxyAssetRes.status, 400);
+
+      // GET /api/link-preview without url -> 400 (not 401)
+      const linkPrevRes = await fetch(`${server.baseUrl}/api/link-preview`);
+      assert.equal(linkPrevRes.status, 400);
+
+      // POST /api/setup when exists -> 400 (not 401)
+      const setupRes = await fetch(`${server.baseUrl}/api/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'new' }),
+      });
+      assert.equal(setupRes.status, 400);
+    });
+
+    test('all gated endpoints strictly reject unauthenticated requests with 401 Unauthorized', async () => {
+      const gatedRequests = [
+        fetch(`${server.baseUrl}/api/notebook`),
+        fetch(`${server.baseUrl}/api/notebook`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/books`),
+        fetch(`${server.baseUrl}/api/books/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/books/switch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/books/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/books/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/books/book-fake-1`, { method: 'DELETE' }),
+        fetch(`${server.baseUrl}/api/books/book-fake-1`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/change-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/api/images/upload`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        fetch(`${server.baseUrl}/images/unauth-img.jpg`),
+        fetch(`${server.baseUrl}/api/images/unauth-img.jpg`),
+        fetch(`${server.baseUrl}/api/images/unauth-img.jpg`, { method: 'DELETE' }),
+        fetch(`${server.baseUrl}/images/unauth-img.jpg`, { method: 'DELETE' }),
+      ];
+
+      const responses = await Promise.all(gatedRequests);
+      for (const res of responses) {
+        assert.equal(res.status, 401, `Expected 401 for ${res.url}, got ${res.status}`);
+        const json = await res.json().catch(() => ({}));
+        assert.equal(json.error, 'Notebook is locked.');
+      }
+    });
+
+    test('authenticated sessions successfully access gated endpoints and route aliases', async () => {
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        Cookie: `notebook_session=${sessionCookie}`,
+      };
+
+      // Test POST /api/save alias
+      const saveRes = await fetch(`${server.baseUrl}/api/save`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          notebook: {
+            title: 'Saved Via Alias',
+            coverColor: 'burgundy',
+            pages: [{ id: 'p-alias-1', font: 'Georgia', fontSize: '18px', html: '<p>Saved content</p>' }],
+          },
+        }),
+      });
+      assert.equal(saveRes.status, 200);
+      const saveJson = await saveRes.json();
+      assert.equal(saveJson.ok, true);
+      assert.equal(saveJson.notebook.title, 'Saved Via Alias');
+
+      // Test POST /api/books/create
+      const createRes = await fetch(`${server.baseUrl}/api/books/create`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ title: 'Second Volume', coverColor: 'navy' }),
+      });
+      assert.equal(createRes.status, 200);
+      const createJson = await createRes.json();
+      const secondBookId = createJson.notebook.id;
+
+      // Test PUT /api/books/:id alias
+      const putRes = await fetch(`${server.baseUrl}/api/books/${secondBookId}`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ title: 'Renamed Second Volume', coverColor: 'green' }),
+      });
+      assert.equal(putRes.status, 200);
+
+      // Test DELETE /api/books/:id alias
+      const delRes = await fetch(`${server.baseUrl}/api/books/${secondBookId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      assert.equal(delRes.status, 200);
+      const delJson = await delRes.json();
+      assert.equal(delJson.ok, true);
+      assert.equal(delJson.vault.books.length, 1);
+
+      // Verify minimum 1 book constraint with DELETE /api/books/:id
+      const delLastRes = await fetch(`${server.baseUrl}/api/books/${delJson.vault.books[0].id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      assert.equal(delLastRes.status, 400);
+      const delLastJson = await delLastRes.json();
+      assert.equal(delLastJson.error, 'You must have at least one notebook.');
+    });
+  });
+
+  describe('Cold-Start Seed Copying in Serverless Environments', () => {
+    let seedServer;
+    const seedPassword = 'SeedPassword2026!';
+    const seedSalt = crypto.randomBytes(16).toString('hex');
+    const seedKey = deriveKey(seedPassword, seedSalt);
+    const vercelDataDir = path.join('/tmp', 'data');
+
+    const seedVault = {
+      version: 2,
+      activeBookId: 'book-seed',
+      books: [
+        {
+          id: 'book-seed',
+          title: 'Bundled Seed Chronicles',
+          coverColor: 'burgundy',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          pages: [
+            { id: 'p-seed-1', font: 'Georgia', fontSize: '18px', html: '<p>Bundled seed page content</p>' },
+          ],
+        },
+      ],
+    };
+
+    const encryptedSeedPayload = {
+      version: 2,
+      salt: seedSalt,
+      ...encryptData(seedVault, seedKey),
+    };
+
+    before(async () => {
+      // Clear /tmp/data to guarantee a cold start
+      try {
+        if (fs.existsSync(vercelDataDir)) {
+          fs.rmSync(vercelDataDir, { recursive: true, force: true });
+        }
+      } catch (e) {}
+
+      // Spawn a Vercel server where bundled data has a seeded notebook
+      seedServer = await spawnTestServer({
+        isVercel: true,
+        initialVault: encryptedSeedPayload,
+      });
+    });
+
+    after(async () => {
+      if (seedServer) await seedServer.stop();
+      try {
+        if (fs.existsSync(vercelDataDir)) {
+          fs.rmSync(vercelDataDir, { recursive: true, force: true });
+        }
+      } catch (e) {}
+    });
+
+    test('cold-start seed copies bundled notebook.enc.json to /tmp/data', async () => {
+      // Status should recognize existing seeded notebook
+      const statusRes = await fetch(`${seedServer.baseUrl}/api/status`);
+      assert.equal(statusRes.status, 200);
+      const statusJson = await statusRes.json();
+      assert.equal(statusJson.setupNeeded, false);
+      assert.equal(statusJson.unlocked, false);
+
+      // Verify file exists on /tmp/data
+      const seededFile = path.join(vercelDataDir, 'notebook.enc.json');
+      assert.ok(fs.existsSync(seededFile), 'Seeded file must exist in /tmp/data');
+
+      // Verify we can unlock the seeded notebook immediately
+      const unlockRes = await fetch(`${seedServer.baseUrl}/api/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: seedPassword }),
+      });
+      assert.equal(unlockRes.status, 200);
+      const unlockJson = await unlockRes.json();
+      assert.equal(unlockJson.ok, true);
+      assert.equal(unlockJson.notebook.title, 'Bundled Seed Chronicles');
+      assert.equal(unlockJson.notebook.pages[0].html, '<p>Bundled seed page content</p>');
+    });
+  });
+
 });
+

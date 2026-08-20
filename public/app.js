@@ -1355,6 +1355,50 @@
     );
   }
 
+  async function buildPreviewCardHTML(url) {
+    const safeUrl = escapeAttr(url);
+    let title = url;
+    let desc = '';
+    let image = '';
+    let domain = '';
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, '');
+      title = domain;
+    } catch (e) {}
+
+    try {
+      const res = await fetch('/api/link-preview?url=' + encodeURIComponent(url));
+      const data = await res.json();
+      if (data && data.ok) {
+        title = data.title || title;
+        desc = data.description || '';
+        image = data.image || '';
+        domain = data.domain || domain;
+      }
+    } catch (e) {}
+
+    const safeTitle = escapeHtml(title);
+    const safeDesc = escapeHtml(desc);
+    const safeDomain = escapeHtml(domain);
+
+    const thumbHtml = image
+      ? `<img class="nb-link-card__thumb" src="${escapeAttr(image)}" alt="">`
+      : `<span class="nb-link-card__thumb--placeholder">📰</span>`;
+    const descHtml = safeDesc ? `<div class="nb-link-card__desc">${safeDesc}</div>` : '';
+
+    return (
+      `<a class="nb-link-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer" contenteditable="false">` +
+        thumbHtml +
+        `<div class="nb-link-card__body">` +
+          `<div class="nb-link-card__title">${safeTitle}</div>` +
+          descHtml +
+          `<div class="nb-link-card__domain">${safeDomain} <span class="nb-link-card__domain-dot">•</span> Preview Card</div>` +
+        `</div>` +
+        `<span class="nb-link-card__arrow">↗</span>` +
+      `</a><br>`
+    );
+  }
+
   async function handlePaste(e, el) {
     const clipboard = e.clipboardData || window.clipboardData;
     if (!clipboard) return;
@@ -1553,7 +1597,7 @@
               closeSearchModal();
               activePageEl.focus();
               restoreSelection();
-              const html = await buildUrlInsertHTML(url);
+              const html = await buildPreviewCardHTML(url);
               document.execCommand('insertHTML', false, html);
               syncSpreadFromDOM();
               scheduleSave();

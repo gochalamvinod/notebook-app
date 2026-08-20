@@ -96,6 +96,10 @@ function startServers() {
         res.writeHead(200, { 'Content-Type': 'image/png' });
         return res.end(fakePng);
       }
+      if (url.pathname === '/preview-page') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end('<!DOCTYPE html><html><head><title>Test Preview Title</title><meta property="og:description" content="Test Preview Description"><meta property="og:image" content="https://example.com/test-thumb.jpg"></head><body><h1>Preview Page</h1></body></html>');
+      }
 
       res.writeHead(404);
       res.end('Not found');
@@ -375,6 +379,29 @@ async function runTests() {
     const iframeSrc = getIframeSrcForUrl(testUrl);
 
     assert.ok(iframeSrc.startsWith('/api/proxy?url='));
+  });
+
+  // --- Test 14: Link Preview Endpoint Metadata Extraction (Method 7) ---
+  await test('Link preview endpoint /api/link-preview extracts OpenGraph metadata', async () => {
+    const targetUrl = `http://localhost:${mockTargetPort}/preview-page`;
+    const res = await makeRequest(`/api/link-preview?url=${encodeURIComponent(targetUrl)}`);
+
+    assert.strictEqual(res.status, 200);
+    const json = JSON.parse(res.body);
+    assert.strictEqual(json.ok, true);
+    assert.strictEqual(json.title, 'Test Preview Title');
+    assert.strictEqual(json.description, 'Test Preview Description');
+    assert.strictEqual(json.image, 'https://example.com/test-thumb.jpg');
+    assert.strictEqual(json.domain, 'localhost');
+  });
+
+  // --- Test 15: Search API Endpoint (/api/search) ---
+  await test('Search API /api/search returns results array or fallback structure', async () => {
+    const res = await makeRequest(`/api/search?q=test`);
+    assert.strictEqual(res.status, 200);
+    const json = JSON.parse(res.body);
+    assert.strictEqual(json.ok, true);
+    assert.ok(Array.isArray(json.results));
   });
 
   await stopServers();

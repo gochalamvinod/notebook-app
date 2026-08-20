@@ -57,6 +57,11 @@ describe('Tier 2: API Integration Tests', () => {
         res.end(JSON.stringify({ status: 'live', count: 42 }));
         return;
       }
+      if (url.pathname === '/test-thumb.jpg') {
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        return;
+      }
       res.writeHead(404);
       res.end();
     });
@@ -177,7 +182,6 @@ describe('Tier 2: API Integration Tests', () => {
         { path: '/images/sample.jpg', method: 'GET' },
         { path: '/api/images/sample.jpg', method: 'DELETE' },
         { path: '/api/change-password', method: 'POST', body: { newPassword: '1234' } },
-        { path: '/api/proxy-asset?url=http://example.com', method: 'GET' },
       ];
 
       for (const ep of protectedEndpoints) {
@@ -506,6 +510,54 @@ describe('Tier 2: API Integration Tests', () => {
       });
       assert.equal(verifyRes.status, 404);
     });
+
+    test('POST /api/images/upload creates file and returns url and filename', async () => {
+      const res = await fetch(`${server.baseUrl}/api/images/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `notebook_session=${sessionCookie}`,
+        },
+        body: JSON.stringify({
+          data: `data:image/png;base64,${testBase64Png}`,
+          ext: 'png',
+        }),
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, true);
+      assert.ok(json.url);
+      assert.ok(json.filename);
+
+      // Verify GET /api/images/:filename alias serves the image
+      const getRes = await fetch(`${server.baseUrl}/api/images/${json.filename}`, {
+        headers: { Cookie: `notebook_session=${sessionCookie}` },
+      });
+      assert.equal(getRes.status, 200);
+      const buffer = await getRes.arrayBuffer();
+      assert.deepEqual(Buffer.from(buffer), Buffer.from(testBase64Png, 'base64'));
+
+      // Clean up
+      await fetch(`${server.baseUrl}/api/images/${json.filename}`, {
+        method: 'DELETE',
+        headers: { Cookie: `notebook_session=${sessionCookie}` },
+      });
+    });
+
+    test('Path traversal attempts on /images/:filename and /api/images/:filename are prevented', async () => {
+      const badPaths = [
+        '../notebook.enc.json',
+        '..%2fnotebook.enc.json',
+        'subdir/secret.txt',
+        '..\\notebook.enc.json',
+      ];
+      for (const bad of badPaths) {
+        const res = await fetch(`${server.baseUrl}/api/images/${encodeURIComponent(bad)}`, {
+          headers: { Cookie: `notebook_session=${sessionCookie}` },
+        });
+        assert.ok([400, 403, 404].includes(res.status), `Path traversal ${bad} should be blocked (got ${res.status})`);
+      }
+    });
   });
 
   describe('Streaming Proxy & Link Preview', () => {
@@ -576,6 +628,12 @@ describe('Tier 2: API Integration Tests', () => {
       const json = await res.json();
       assert.equal(json.status, 'live');
       assert.equal(json.count, 42);
+    });
+
+    test('GET /api/proxy-asset proxies subresource assets publicly without authentication', async () => {
+      const res = await fetch(`${server.baseUrl}/api/proxy-asset?url=${encodeURIComponent(mockTargetUrl + '/test-thumb.jpg')}`);
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get('content-type'), 'image/jpeg');
     });
   });
 

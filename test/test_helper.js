@@ -106,13 +106,25 @@ async function spawnTestServer(options = {}) {
     imagesDir,
     async stop() {
       return new Promise((resolve) => {
+        if (proc.killed || proc.exitCode !== null) {
+          try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+          return resolve();
+        }
+        const timer = setTimeout(() => {
+          try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+          resolve();
+        }, 1500);
+        proc.on('close', () => {
+          clearTimeout(timer);
+          try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+          resolve();
+        });
         try {
           proc.kill();
-        } catch (e) {}
-        try {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-        } catch (e) {}
-        resolve();
+        } catch (e) {
+          clearTimeout(timer);
+          resolve();
+        }
       });
     },
   };

@@ -25,12 +25,32 @@ const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const zlib = require('zlib');
+const os = require('os');
 const { URL } = require('url');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isVercel = !!process.env.VERCEL;
-const DATA_DIR = isVercel ? path.join('/tmp', 'data') : path.join(__dirname, 'data');
+
+function resolveDataDir() {
+  if (isVercel) {
+    return path.join('/tmp', 'data');
+  }
+  const defaultDir = path.join(__dirname, 'data');
+  try {
+    if (!fs.existsSync(defaultDir)) {
+      fs.mkdirSync(defaultDir, { recursive: true });
+    }
+    const testFile = path.join(defaultDir, '.write_test_' + process.pid);
+    fs.writeFileSync(testFile, '1');
+    fs.unlinkSync(testFile);
+    return defaultDir;
+  } catch (err) {
+    return path.join(os.tmpdir ? os.tmpdir() : '/tmp', 'data');
+  }
+}
+
+const DATA_DIR = resolveDataDir();
 const DATA_FILE = path.join(DATA_DIR, 'notebook.enc.json');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
@@ -41,9 +61,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
-  const bundledFile = path.join(__dirname, 'data', 'notebook.enc.json');
-  if (isVercel && !fs.existsSync(DATA_FILE) && fs.existsSync(bundledFile)) {
-    fs.copyFileSync(bundledFile, DATA_FILE);
+  const bundledDir = path.join(__dirname, 'data');
+  if (DATA_DIR !== bundledDir && fs.existsSync(bundledDir)) {
+    const bundledFile = path.join(bundledDir, 'notebook.enc.json');
+    if (!fs.existsSync(DATA_FILE) && fs.existsSync(bundledFile)) {
+      fs.copyFileSync(bundledFile, DATA_FILE);
+    }
+    const bundledImages = path.join(bundledDir, 'images');
+    if (fs.existsSync(bundledImages) && fs.existsSync(IMAGES_DIR)) {
+      try {
+        const files = fs.readdirSync(bundledImages);
+        for (const file of files) {
+          const dest = path.join(IMAGES_DIR, file);
+          if (!fs.existsSync(dest)) {
+            fs.copyFileSync(path.join(bundledImages, file), dest);
+          }
+        }
+      } catch (e) {}
+    }
   }
 } catch (e) {}
 
@@ -290,7 +325,7 @@ app.get('/api/notebook', requireUnlocked, (req, res) => {
   }
 });
 
-app.post('/api/notebook', requireUnlocked, (req, res) => {
+function handleSaveNotebook(req, res) {
   try {
     const raw = decryptData(readFile(), req.sessionKey);
     let vault = normalizeVault(raw);
@@ -315,7 +350,10 @@ app.post('/api/notebook', requireUnlocked, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Could not save the notebook.' });
   }
-});
+}
+
+app.post('/api/notebook', requireUnlocked, handleSaveNotebook);
+app.post('/api/save', requireUnlocked, handleSaveNotebook);
 
 // ---------- Multiple Books Management Routes ----------
 
@@ -383,14 +421,19 @@ app.post('/api/books/switch', requireUnlocked, (req, res) => {
   }
 });
 
-app.post('/api/books/delete', requireUnlocked, (req, res) => {
+function handleDeleteBook(req, res) {
   try {
-    const { bookId } = req.body || {};
+    const bookId = (req.body && req.body.bookId) || req.params.id;
+    if (!bookId) return res.status(400).json({ error: 'Missing bookId' });
     const raw = decryptData(readFile(), req.sessionKey);
     const vault = normalizeVault(raw);
 
     if (vault.books.length <= 1) {
       return res.status(400).json({ error: 'You must have at least one notebook.' });
+    }
+
+    if (!vault.books.some((b) => b.id === bookId)) {
+      return res.status(404).json({ error: 'Book not found.' });
     }
 
     vault.books = vault.books.filter((b) => b.id !== bookId);
@@ -404,19 +447,23 @@ app.post('/api/books/delete', requireUnlocked, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Could not delete book.' });
   }
-});
+}
 
-app.post('/api/books/rename', requireUnlocked, (req, res) => {
+app.post('/api/books/delete', requireUnlocked, handleDeleteBook);
+app.delete('/api/books/:id', requireUnlocked, handleDeleteBook);
+
+function handleRenameBook(req, res) {
   try {
-    const { bookId, title, coverColor } = req.body || {};
+    const bookId = (req.body && req.body.bookId) || req.params.id;
+    const { title, coverColor } = req.body || {};
     const raw = decryptData(readFile(), req.sessionKey);
     const vault = normalizeVault(raw);
 
     const target = vault.books.find((b) => b.id === bookId);
     if (!target) return res.status(404).json({ error: 'Book not found.' });
 
-    if (title) target.title = title.trim().slice(0, 80);
-    if (coverColor) target.coverColor = coverColor;
+    if (title !== undefined) target.title = String(title).trim().slice(0, 80);
+    if (coverColor !== undefined) target.coverColor = coverColor;
     target.updatedAt = new Date().toISOString();
 
     const file = readFile();
@@ -425,7 +472,10 @@ app.post('/api/books/rename', requireUnlocked, (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Could not update book.' });
   }
-});
+}
+
+app.post('/api/books/rename', requireUnlocked, handleRenameBook);
+app.put('/api/books/:id', requireUnlocked, handleRenameBook);
 
 app.post('/api/change-password', requireUnlocked, (req, res) => {
   try {
@@ -450,9 +500,9 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
 // ---------- image file API ----------
 // Images are stored in data/images/ and served only to unlocked sessions.
 // The client POSTs { filename: 'foo.jpg', data: '<base64>' } and gets back
-// { ok: true, url: '/images/<uuid>.jpg' }.
+// { ok: true, url: '/images/<uuid>.jpg', filename: '<uuid>.jpg' }.
 
-app.post('/api/images', requireUnlocked, (req, res) => {
+function handleImageUpload(req, res) {
   try {
     const { data, ext } = req.body || {};
     if (!data) return res.status(400).json({ error: 'No image data.' });
@@ -461,30 +511,57 @@ app.post('/api/images', requireUnlocked, (req, res) => {
     const filename = id + '.' + safeExt;
     const base64Data = data.includes(',') ? data.split(',')[1] : data;
     fs.writeFileSync(path.join(IMAGES_DIR, filename), Buffer.from(base64Data, 'base64'));
-    res.json({ ok: true, url: '/images/' + filename });
+    res.json({ ok: true, url: '/images/' + filename, filename });
   } catch (err) {
     res.status(500).json({ error: 'Could not save the image.' });
   }
-});
+}
 
-// Serve image files — session-gated so the files can't be fetched anonymously.
-app.get('/images/:filename', requireUnlocked, (req, res) => {
-  const filename = path.basename(req.params.filename);
-  const filePath = path.join(IMAGES_DIR, filename);
+app.post('/api/images', requireUnlocked, handleImageUpload);
+app.post('/api/images/upload', requireUnlocked, handleImageUpload);
+
+function handleServeImage(req, res) {
+  const raw = req.params.filename;
+  if (!raw || typeof raw !== 'string') return res.status(400).end();
+  const filename = path.basename(raw);
+  if (filename !== raw || filename.includes('..') || !/^[a-zA-Z0-9_.-]+$/.test(filename)) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  const safeDir = path.resolve(IMAGES_DIR);
+  const filePath = path.resolve(safeDir, filename);
+  if (!filePath.startsWith(safeDir + path.sep)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
   if (!fs.existsSync(filePath)) return res.status(404).end();
   res.sendFile(filePath);
-});
+}
 
-app.delete('/api/images/:filename', requireUnlocked, (req, res) => {
+// Serve image files — session-gated so the files can't be fetched anonymously.
+app.get('/images/:filename', requireUnlocked, handleServeImage);
+app.get('/api/images/:filename', requireUnlocked, handleServeImage);
+
+function handleDeleteImage(req, res) {
   try {
-    const filename = path.basename(req.params.filename);
-    const filePath = path.join(IMAGES_DIR, filename);
+    const raw = req.params.filename;
+    if (!raw || typeof raw !== 'string') return res.status(400).end();
+    const filename = path.basename(raw);
+    if (filename !== raw || filename.includes('..') || !/^[a-zA-Z0-9_.-]+$/.test(filename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+    const safeDir = path.resolve(IMAGES_DIR);
+    const filePath = path.resolve(safeDir, filename);
+    if (!filePath.startsWith(safeDir + path.sep)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Could not delete the image.' });
   }
-});
+}
+
+app.delete('/api/images/:filename', requireUnlocked, handleDeleteImage);
+app.delete('/images/:filename', requireUnlocked, handleDeleteImage);
 
 // ---------- live link previews ----------
 // Pasting a bare URL into a page tries to show a real title/thumbnail
