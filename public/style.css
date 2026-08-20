@@ -452,6 +452,7 @@ button, input, select {
 /* ----- Live website embed (iframe) ----- */
 
 .nb-live-embed {
+  position: relative;
   margin: 16px 0;
   border: 1px solid rgba(44, 36, 22, 0.22);
   border-radius: 10px;
@@ -498,42 +499,40 @@ button, input, select {
 }
 .nb-live-embed__omnibox:focus-within {
   background: #fff;
-  border-color: var(--brass-dark);
+  border-color: var(--brass);
   box-shadow: 0 0 0 2px rgba(184, 147, 90, 0.25);
 }
 .nb-live-embed__icon {
   font-size: 0.85rem;
+  line-height: 1;
   flex: none;
-  opacity: 0.85;
 }
 .nb-live-embed__address-input {
   flex: 1;
   min-width: 0;
-  border: 0;
+  border: none;
   background: transparent;
-  padding: 0;
-  font-size: 0.76rem;
-  font-family: inherit;
-  color: var(--ink);
   outline: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-family: var(--font-body), Georgia, serif;
+  font-size: 0.78rem;
+  color: var(--ink);
+  padding: 0;
+  line-height: 24px;
 }
 .nb-live-embed__address-input::placeholder {
   color: var(--ink-faint);
+  font-style: italic;
 }
 .nb-live-embed__info {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.15;
 }
 .nb-live-embed__title {
-  font-weight: 700;
   font-size: 0.82rem;
-  line-height: 1.2;
+  font-weight: 600;
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -593,15 +592,15 @@ button, input, select {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   cursor: nwse-resize;
-  z-index: 10;
-  background: linear-gradient(135deg, transparent 50%, rgba(184, 147, 90, 0.6) 50%);
+  z-index: 50;
+  background: linear-gradient(135deg, transparent 45%, rgba(184, 147, 90, 0.8) 45%);
   border-bottom-right-radius: 8px;
 }
 .nb-live-embed__resize-handle:hover {
-  background: linear-gradient(135deg, transparent 40%, var(--brass) 40%);
+  background: linear-gradient(135deg, transparent 35%, var(--brass) 35%);
 }
 
 /* Loading spinner — visible while iframe is empty/loading */

@@ -1072,177 +1072,176 @@
   function wireEmbedResizers(pageEl) {
     if (!pageEl) return;
 
-    // 1. Back button
-    pageEl.querySelectorAll('.nb-live-embed__btn--back').forEach((btn) => {
-      if (btn.dataset.backWired) return;
-      btn.dataset.backWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
-        if (iframe && iframe.contentWindow) {
-          try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'back' }, '*'); } catch (err) {}
-        }
-      });
-    });
-
-    // 2. Forward button
-    pageEl.querySelectorAll('.nb-live-embed__btn--forward').forEach((btn) => {
-      if (btn.dataset.fwdWired) return;
-      btn.dataset.fwdWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
-        if (iframe && iframe.contentWindow) {
-          try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'forward' }, '*'); } catch (err) {}
-        }
-      });
-    });
-
-    // 3. Reload button
-    pageEl.querySelectorAll('.nb-live-embed__btn--reload').forEach((btn) => {
-      if (btn.dataset.reloadWired) return;
-      btn.dataset.reloadWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        if (!embed) return;
-        const iframe = embed.querySelector('.nb-live-embed__iframe');
-        const video = embed.querySelector('.nb-live-embed__video');
-        const url = embed.dataset.url;
-        if (iframe && url) {
-          const src = getIframeSrcForUrl(url);
-          iframe.src = src + (src.includes('?') ? '&' : '?') + '_t=' + Date.now();
-        } else if (video && url) {
-          video.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
-          video.load();
-        }
-      });
-    });
-
-    // 4. Home / Reset button
-    pageEl.querySelectorAll('.nb-live-embed__btn--home').forEach((btn) => {
-      if (btn.dataset.homeWired) return;
-      btn.dataset.homeWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        if (!embed) return;
-        const iframe = embed.querySelector('.nb-live-embed__iframe');
-        const url = embed.dataset.url;
-        if (iframe && url) {
-          iframe.src = getIframeSrcForUrl(url);
-          const input = embed.querySelector('.nb-live-embed__address-input');
-          if (input) input.value = url;
-        }
-      });
-    });
-
-    // 5. Interactive Omnibox Address Input
-    pageEl.querySelectorAll('.nb-live-embed__address-input').forEach((input) => {
-      if (input.dataset.inputWired) return;
-      input.dataset.inputWired = '1';
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const embed = input.closest('.nb-live-embed');
-          if (!embed) return;
-          const iframe = embed.querySelector('.nb-live-embed__iframe');
-          let val = input.value.trim();
-          if (!val) return;
-          if (!/^https?:\/\//i.test(val) && !val.includes('.') && !val.includes('/')) {
-            val = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(val);
-          } else if (!/^https?:\/\//i.test(val)) {
-            val = 'https://' + val;
-          }
-          embed.dataset.url = val;
-          input.value = val;
-          const openBtn = embed.querySelector('.nb-live-embed__btn--open');
-          if (openBtn) openBtn.href = val;
-          if (iframe) iframe.src = getIframeSrcForUrl(val);
-          syncSpreadFromDOM();
-          scheduleSave();
-        }
-      });
-    });
-
-    // 6. Expand / fullscreen toggle buttons
-    pageEl.querySelectorAll('.nb-live-embed__btn--expand').forEach((btn) => {
-      if (btn.dataset.expandWired) return;
-      btn.dataset.expandWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        if (!embed) return;
-        embed.classList.toggle('nb-live-embed--expanded');
-      });
-    });
-
-    // 7. Remove buttons
-    pageEl.querySelectorAll('.nb-live-embed__btn--remove').forEach((btn) => {
-      if (btn.dataset.removeWired) return;
-      btn.dataset.removeWired = '1';
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = btn.closest('.nb-live-embed');
-        if (embed) embed.remove();
-        syncSpreadFromDOM();
-        scheduleSave();
-      });
-    });
-
-    // 8. Draggable corner resize grip
-    pageEl.querySelectorAll('.nb-live-embed__resize-handle').forEach((handle) => {
-      if (handle.dataset.handleWired) return;
-      handle.dataset.handleWired = '1';
-      handle.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const embed = handle.closest('.nb-live-embed');
-        if (!embed) return;
-        const wrap = embed.querySelector('.nb-live-embed__frame-wrap');
-        const iframe = embed.querySelector('.nb-live-embed__iframe');
-        if (!wrap) return;
-        if (iframe) iframe.style.pointerEvents = 'none';
-        const startY = e.clientY;
-        const startH = wrap.offsetHeight;
-
-        function onMove(ev) {
-          const newH = Math.max(180, Math.min(1000, startH + (ev.clientY - startY)));
-          wrap.style.height = newH + 'px';
-        }
-        function onUp() {
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          if (iframe) iframe.style.pointerEvents = '';
-          syncSpreadFromDOM();
-          scheduleSave();
-        }
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-    });
-
-    // 9. Ensure any previously saved embed whose iframe had a broken src gets upgraded
+    // 1. Ensure any previously saved embed with empty/broken src gets initialized
     pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
       const iframe = embed.querySelector('.nb-live-embed__iframe');
       const url = embed.dataset.url;
       if (iframe && url) {
-        const expectedSrc = getIframeSrcForUrl(url);
         const curSrc = iframe.getAttribute('src') || '';
-        if (!curSrc || curSrc.includes('youtube.com/') || curSrc.startsWith('/search') || curSrc.includes('undefined') || curSrc !== expectedSrc) {
-          iframe.src = expectedSrc;
+        if (!curSrc || curSrc.includes('undefined') || curSrc === 'about:blank') {
+          iframe.src = getIframeSrcForUrl(url);
         }
       }
     });
   }
+
+  // Global delegated click listener for all embed and image buttons
+  document.addEventListener('click', (e) => {
+    // 1. Back button
+    const backBtn = e.target.closest('.nb-live-embed__btn--back');
+    if (backBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = backBtn.closest('.nb-live-embed');
+      const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
+      if (iframe && iframe.contentWindow) {
+        try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'back' }, '*'); } catch (err) {}
+      }
+      return;
+    }
+
+    // 2. Forward button
+    const fwdBtn = e.target.closest('.nb-live-embed__btn--forward');
+    if (fwdBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = fwdBtn.closest('.nb-live-embed');
+      const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
+      if (iframe && iframe.contentWindow) {
+        try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'forward' }, '*'); } catch (err) {}
+      }
+      return;
+    }
+
+    // 3. Reload button
+    const reloadBtn = e.target.closest('.nb-live-embed__btn--reload');
+    if (reloadBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = reloadBtn.closest('.nb-live-embed');
+      if (!embed) return;
+      const iframe = embed.querySelector('.nb-live-embed__iframe');
+      const video = embed.querySelector('.nb-live-embed__video');
+      const url = embed.dataset.url;
+      if (iframe && url) {
+        const src = getIframeSrcForUrl(url);
+        iframe.src = src + (src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+      } else if (video && url) {
+        video.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        video.load();
+      }
+      return;
+    }
+
+    // 4. Home / Reset button
+    const homeBtn = e.target.closest('.nb-live-embed__btn--home');
+    if (homeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = homeBtn.closest('.nb-live-embed');
+      if (!embed) return;
+      const iframe = embed.querySelector('.nb-live-embed__iframe');
+      const url = embed.dataset.url;
+      if (iframe && url) {
+        iframe.src = getIframeSrcForUrl(url);
+        const input = embed.querySelector('.nb-live-embed__address-input');
+        if (input) input.value = url;
+      }
+      return;
+    }
+
+    // 5. Expand / fullscreen toggle
+    const expandBtn = e.target.closest('.nb-live-embed__btn--expand');
+    if (expandBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = expandBtn.closest('.nb-live-embed');
+      if (embed) embed.classList.toggle('nb-live-embed--expanded');
+      return;
+    }
+
+    // 6. Remove embed
+    const removeBtn = e.target.closest('.nb-live-embed__btn--remove');
+    if (removeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const embed = removeBtn.closest('.nb-live-embed');
+      if (embed) {
+        embed.remove();
+        syncSpreadFromDOM();
+        scheduleSave();
+      }
+      return;
+    }
+
+    // 7. Image click: activate 8-handle resize overlay
+    const img = e.target.closest('.page-content img');
+    if (img) {
+      const pageEl = img.closest('.page-content');
+      if (pageEl) {
+        e.stopPropagation();
+        e.preventDefault();
+        showImageOverlay(img, pageEl);
+      }
+    }
+  });
+
+  // Global delegated mousedown for the live embed height resize handle
+  document.addEventListener('mousedown', (e) => {
+    const handle = e.target.closest('.nb-live-embed__resize-handle');
+    if (!handle) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const embed = handle.closest('.nb-live-embed');
+    if (!embed) return;
+    const wrap = embed.querySelector('.nb-live-embed__frame-wrap');
+    const iframe = embed.querySelector('.nb-live-embed__iframe');
+    if (!wrap) return;
+    if (iframe) iframe.style.pointerEvents = 'none';
+    const startY = e.clientY;
+    const startH = wrap.offsetHeight;
+
+    function onMove(ev) {
+      const newH = Math.max(180, Math.min(1200, startH + (ev.clientY - startY)));
+      wrap.style.height = newH + 'px';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (iframe) iframe.style.pointerEvents = '';
+      syncSpreadFromDOM();
+      scheduleSave();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Global delegated keydown for omnibox address input
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const input = e.target.closest('.nb-live-embed__address-input');
+      if (input) {
+        e.preventDefault();
+        const embed = input.closest('.nb-live-embed');
+        if (!embed) return;
+        const iframe = embed.querySelector('.nb-live-embed__iframe');
+        let val = input.value.trim();
+        if (!val) return;
+        if (!/^https?:\/\//i.test(val) && !val.includes('.') && !val.includes('/')) {
+          val = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(val);
+        } else if (!/^https?:\/\//i.test(val)) {
+          val = 'https://' + val;
+        }
+        embed.dataset.url = val;
+        input.value = val;
+        const openBtn = embed.querySelector('.nb-live-embed__btn--open');
+        if (openBtn) openBtn.href = val;
+        if (iframe) iframe.src = getIframeSrcForUrl(val);
+        syncSpreadFromDOM();
+        scheduleSave();
+      }
+    }
+  });
 
   // Global Escape key listener to close expanded fullscreen embeds
   document.addEventListener('keydown', (e) => {
