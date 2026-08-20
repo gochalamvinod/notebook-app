@@ -1069,63 +1069,40 @@
   });
 
   // ---------- live-embed resizer & controls ----------
-  // The ::after pseudo-element at the bottom of .nb-live-embed__frame-wrap
-  // acts as a visual drag handle. We wire up a mousedown on the frame-wrap
-  // itself (near the bottom) to drag-resize the iframe/video height.
-
   function wireEmbedResizers(pageEl) {
     if (!pageEl) return;
 
-    // 1. Drag-to-resize height handle
-    pageEl.querySelectorAll('.nb-live-embed__frame-wrap').forEach((wrap) => {
-      if (wrap.dataset.resizeWired) return;
-      wrap.dataset.resizeWired = '1';
-
-      wrap.addEventListener('mousedown', (e) => {
-        // Only activate near the bottom 20px (the resize handle zone).
-        const rect = wrap.getBoundingClientRect();
-        if (e.clientY < rect.bottom - 20) return;
-
-        e.preventDefault();
-        e.stopPropagation();
-        const startY = e.clientY;
-        const startH = wrap.offsetHeight;
-        const iframe = wrap.querySelector('iframe');
-
-        // Prevent iframe from swallowing mousemove events during drag
-        if (iframe) iframe.style.pointerEvents = 'none';
-
-        function onMove(ev) {
-          const newH = Math.max(120, startH + ev.clientY - startY);
-          wrap.style.height = newH + 'px';
-        }
-        function onUp() {
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          if (iframe) iframe.style.pointerEvents = '';
-          syncSpreadFromDOM();
-          scheduleSave();
-        }
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-    });
-
-    // 2. Remove buttons
-    pageEl.querySelectorAll('.nb-live-embed__btn--remove').forEach((btn) => {
-      if (btn.dataset.removeWired) return;
-      btn.dataset.removeWired = '1';
+    // 1. Back button
+    pageEl.querySelectorAll('.nb-live-embed__btn--back').forEach((btn) => {
+      if (btn.dataset.backWired) return;
+      btn.dataset.backWired = '1';
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         const embed = btn.closest('.nb-live-embed');
-        if (embed) embed.remove();
-        syncSpreadFromDOM();
-        scheduleSave();
+        const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
+        if (iframe && iframe.contentWindow) {
+          try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'back' }, '*'); } catch (err) {}
+        }
       });
     });
 
-    // 3. Reload buttons to refresh the embedded iframe or video with cache-buster
+    // 2. Forward button
+    pageEl.querySelectorAll('.nb-live-embed__btn--forward').forEach((btn) => {
+      if (btn.dataset.fwdWired) return;
+      btn.dataset.fwdWired = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = btn.closest('.nb-live-embed');
+        const iframe = embed ? embed.querySelector('.nb-live-embed__iframe') : null;
+        if (iframe && iframe.contentWindow) {
+          try { iframe.contentWindow.postMessage({ type: 'nb-embed-cmd', action: 'forward' }, '*'); } catch (err) {}
+        }
+      });
+    });
+
+    // 3. Reload button
     pageEl.querySelectorAll('.nb-live-embed__btn--reload').forEach((btn) => {
       if (btn.dataset.reloadWired) return;
       btn.dataset.reloadWired = '1';
@@ -1147,7 +1124,54 @@
       });
     });
 
-    // 4. Expand / fullscreen toggle buttons
+    // 4. Home / Reset button
+    pageEl.querySelectorAll('.nb-live-embed__btn--home').forEach((btn) => {
+      if (btn.dataset.homeWired) return;
+      btn.dataset.homeWired = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = btn.closest('.nb-live-embed');
+        if (!embed) return;
+        const iframe = embed.querySelector('.nb-live-embed__iframe');
+        const url = embed.dataset.url;
+        if (iframe && url) {
+          iframe.src = getIframeSrcForUrl(url);
+          const input = embed.querySelector('.nb-live-embed__address-input');
+          if (input) input.value = url;
+        }
+      });
+    });
+
+    // 5. Interactive Omnibox Address Input
+    pageEl.querySelectorAll('.nb-live-embed__address-input').forEach((input) => {
+      if (input.dataset.inputWired) return;
+      input.dataset.inputWired = '1';
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const embed = input.closest('.nb-live-embed');
+          if (!embed) return;
+          const iframe = embed.querySelector('.nb-live-embed__iframe');
+          let val = input.value.trim();
+          if (!val) return;
+          if (!/^https?:\/\//i.test(val) && !val.includes('.') && !val.includes('/')) {
+            val = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(val);
+          } else if (!/^https?:\/\//i.test(val)) {
+            val = 'https://' + val;
+          }
+          embed.dataset.url = val;
+          input.value = val;
+          const openBtn = embed.querySelector('.nb-live-embed__btn--open');
+          if (openBtn) openBtn.href = val;
+          if (iframe) iframe.src = getIframeSrcForUrl(val);
+          syncSpreadFromDOM();
+          scheduleSave();
+        }
+      });
+    });
+
+    // 6. Expand / fullscreen toggle buttons
     pageEl.querySelectorAll('.nb-live-embed__btn--expand').forEach((btn) => {
       if (btn.dataset.expandWired) return;
       btn.dataset.expandWired = '1';
@@ -1160,7 +1184,53 @@
       });
     });
 
-    // 5. Ensure any previously saved embed whose iframe had a broken src gets upgraded
+    // 7. Remove buttons
+    pageEl.querySelectorAll('.nb-live-embed__btn--remove').forEach((btn) => {
+      if (btn.dataset.removeWired) return;
+      btn.dataset.removeWired = '1';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = btn.closest('.nb-live-embed');
+        if (embed) embed.remove();
+        syncSpreadFromDOM();
+        scheduleSave();
+      });
+    });
+
+    // 8. Draggable corner resize grip
+    pageEl.querySelectorAll('.nb-live-embed__resize-handle').forEach((handle) => {
+      if (handle.dataset.handleWired) return;
+      handle.dataset.handleWired = '1';
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const embed = handle.closest('.nb-live-embed');
+        if (!embed) return;
+        const wrap = embed.querySelector('.nb-live-embed__frame-wrap');
+        const iframe = embed.querySelector('.nb-live-embed__iframe');
+        if (!wrap) return;
+        if (iframe) iframe.style.pointerEvents = 'none';
+        const startY = e.clientY;
+        const startH = wrap.offsetHeight;
+
+        function onMove(ev) {
+          const newH = Math.max(180, Math.min(1000, startH + (ev.clientY - startY)));
+          wrap.style.height = newH + 'px';
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          if (iframe) iframe.style.pointerEvents = '';
+          syncSpreadFromDOM();
+          scheduleSave();
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+
+    // 9. Ensure any previously saved embed whose iframe had a broken src gets upgraded
     pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
       const iframe = embed.querySelector('.nb-live-embed__iframe');
       const url = embed.dataset.url;
@@ -1179,6 +1249,28 @@
     if (e.key === 'Escape') {
       document.querySelectorAll('.nb-live-embed--expanded').forEach((el) => {
         el.classList.remove('nb-live-embed--expanded');
+      });
+    }
+  });
+
+  // Global message listener from proxied child iframes to update address bar
+  window.addEventListener('message', (e) => {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'nb-embed-nav') {
+      document.querySelectorAll('.nb-live-embed').forEach((embed) => {
+        const iframe = embed.querySelector('.nb-live-embed__iframe');
+        if (iframe && iframe.contentWindow === e.source) {
+          const input = embed.querySelector('.nb-live-embed__address-input');
+          if (input && e.data.url) {
+            let displayUrl = e.data.url;
+            try {
+              const u = new URL(displayUrl);
+              const proxiedParam = u.searchParams.get('url');
+              if (proxiedParam) displayUrl = proxiedParam;
+            } catch (err) {}
+            input.value = displayUrl;
+          }
+        }
       });
     }
   });
@@ -1302,8 +1394,8 @@
   }
 
   /**
-   * Render a live-website or video embed: a header bar (title + domain + reload + expand + open/remove
-   * buttons) on top, and a full iframe of the real website/video player below it.
+   * Render a live-website or video embed: a mini-browser bar (nav buttons, omnibox,
+   * reload, expand, open, remove) on top, and a full interactive iframe below it.
    */
   function buildLiveEmbedHTML(url, title, domain, icon = '🌐') {
     const safeUrl = escapeAttr(url);
@@ -1314,27 +1406,40 @@
     return (
       `<div class="nb-live-embed" contenteditable="false" data-url="${safeUrl}">` +
         `<div class="nb-live-embed__bar">` +
-          `<span class="nb-live-embed__icon">${icon}</span>` +
-          `<span class="nb-live-embed__info">` +
-            `<span class="nb-live-embed__title">${safeTitle}</span>` +
-            `<span class="nb-live-embed__domain">${safeDomain}</span>` +
-          `</span>` +
-          `<button class="nb-live-embed__btn nb-live-embed__btn--reload" title="Reload website">` +
-            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>` +
-          `</button>` +
-          `<button class="nb-live-embed__btn nb-live-embed__btn--expand" title="Expand / Fullscreen">` +
-            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>` +
-          `</button>` +
-          `<a class="nb-live-embed__btn nb-live-embed__btn--open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">` +
-            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` +
-          `</a>` +
-          `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed">` +
-            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
-          `</button>` +
+          `<div class="nb-live-embed__nav-group">` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--back" title="Back">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>` +
+            `</button>` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--forward" title="Forward">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>` +
+            `</button>` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--reload" title="Reload">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>` +
+            `</button>` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--home" title="Original Page">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>` +
+            `</button>` +
+          `</div>` +
+          `<div class="nb-live-embed__omnibox">` +
+            `<span class="nb-live-embed__icon">${icon}</span>` +
+            `<input type="text" class="nb-live-embed__address-input" value="${safeUrl}" title="Type a URL or search query and press Enter" placeholder="Enter URL or search..." />` +
+          `</div>` +
+          `<div class="nb-live-embed__action-group">` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--expand" title="Expand / Fullscreen">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>` +
+            `</button>` +
+            `<a class="nb-live-embed__btn nb-live-embed__btn--open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` +
+            `</a>` +
+            `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed">` +
+              `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
+            `</button>` +
+          `</div>` +
         `</div>` +
         `<div class="nb-live-embed__frame-wrap">` +
           `<iframe class="nb-live-embed__iframe" src="${escapeAttr(iframeSrc)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
         `</div>` +
+        `<div class="nb-live-embed__resize-handle" title="Drag to resize height"></div>` +
       `</div><br>`
     );
   }

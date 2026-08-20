@@ -823,6 +823,26 @@ function buildInjection(baseHref, targetOrigin) {
     `}` +
     `return _origFormSubmit.apply(this,arguments);` +
     `};` +
+    // 9. Sync title & current URL with notebook embed header
+    `function _notifyParent(){` +
+    `try{` +
+    `if(window.parent&&window.parent!==window){` +
+    `window.parent.postMessage({type:'nb-embed-nav',title:document.title||'',url:window.location.href,origin:_origOrigin},'*');` +
+    `}` +
+    `}catch(e){}` +
+    `}` +
+    `window.addEventListener('DOMContentLoaded',_notifyParent);` +
+    `window.addEventListener('load',_notifyParent);` +
+    // 10. Listen for parent commands (back, forward, reload, navigate)
+    `window.addEventListener('message',function(e){` +
+    `if(!e.data||typeof e.data!=='object')return;` +
+    `if(e.data.type==='nb-embed-cmd'){` +
+    `if(e.data.action==='back')history.back();` +
+    `if(e.data.action==='forward')history.forward();` +
+    `if(e.data.action==='reload')window.location.reload();` +
+    `if(e.data.action==='nav'&&e.data.url){window.location.href=_proxyPage+encodeURIComponent(e.data.url)}` +
+    `}` +
+    `});` +
     `})();` +
     `</script>`
   );

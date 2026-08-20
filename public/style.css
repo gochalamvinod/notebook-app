@@ -463,24 +463,65 @@ button, input, select {
 }
 .nb-live-embed:hover {
   border-color: var(--brass);
-  box-shadow: 0 6px 24px rgba(44, 36, 22, 0.18);
+  box-shadow: 0 6px 24px rgba(44, 36, 22, 0.1);
 }
-
-/* Header bar — title, domain, reload, open-in-new-tab, expand, remove */
+/* Header bar — vintage mini-browser bar with nav controls, omnibox, and action buttons */
 .nb-live-embed__bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: linear-gradient(180deg, rgba(244, 237, 222, 0.95), rgba(230, 220, 200, 0.9));
-  border-bottom: 1px solid rgba(44, 36, 22, 0.15);
+  gap: 6px;
+  padding: 5px 8px;
+  background: linear-gradient(180deg, rgba(244, 237, 222, 0.98), rgba(230, 220, 200, 0.92));
+  border-bottom: 1px solid rgba(44, 36, 22, 0.18);
   min-height: 38px;
   user-select: none;
 }
+.nb-live-embed__nav-group,
+.nb-live-embed__action-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.nb-live-embed__omnibox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(44, 36, 22, 0.2);
+  border-radius: 6px;
+  padding: 2px 8px;
+  height: 28px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.nb-live-embed__omnibox:focus-within {
+  background: #fff;
+  border-color: var(--brass-dark);
+  box-shadow: 0 0 0 2px rgba(184, 147, 90, 0.25);
+}
 .nb-live-embed__icon {
-  font-size: 1rem;
+  font-size: 0.85rem;
   flex: none;
   opacity: 0.85;
+}
+.nb-live-embed__address-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.76rem;
+  font-family: inherit;
+  color: var(--ink);
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nb-live-embed__address-input::placeholder {
+  color: var(--ink-faint);
 }
 .nb-live-embed__info {
   flex: 1;
@@ -509,13 +550,13 @@ button, input, select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   border: 1px solid rgba(44, 36, 22, 0.15);
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.65);
   color: var(--brass-dark);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   text-decoration: none;
   flex: none;
   cursor: pointer;
@@ -523,7 +564,7 @@ button, input, select {
   transition: all 0.15s ease;
 }
 .nb-live-embed__btn:hover {
-  background: rgba(184, 147, 90, 0.25);
+  background: rgba(184, 147, 90, 0.3);
   border-color: var(--brass);
   color: var(--brass-dark);
   transform: translateY(-1px);
@@ -545,7 +586,24 @@ button, input, select {
   height: 380px;
   overflow: hidden;
   background: #fff;
+  transition: height 0.1s;
 }
+/* Draggable corner resize grip */
+.nb-live-embed__resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 10;
+  background: linear-gradient(135deg, transparent 50%, rgba(184, 147, 90, 0.6) 50%);
+  border-bottom-right-radius: 8px;
+}
+.nb-live-embed__resize-handle:hover {
+  background: linear-gradient(135deg, transparent 40%, var(--brass) 40%);
+}
+
 /* Loading spinner — visible while iframe is empty/loading */
 .nb-live-embed__frame-wrap::before {
   content: '';
@@ -588,18 +646,21 @@ button, input, select {
 /* Fullscreen / Expanded Overlay Mode for Embeds */
 .nb-live-embed--expanded {
   position: fixed !important;
-  top: 40px !important;
+  top: 30px !important;
   left: 50% !important;
   transform: translateX(-50%) !important;
-  width: 92vw !important;
-  max-width: 1200px !important;
-  height: 85vh !important;
+  width: 94vw !important;
+  max-width: 1300px !important;
+  height: 90vh !important;
   z-index: 9999 !important;
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7) !important;
   border: 2px solid var(--brass) !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 .nb-live-embed--expanded .nb-live-embed__frame-wrap {
-  height: calc(85vh - 38px) !important;
+  flex: 1 !important;
+  height: auto !important;
 }
 
 /* Resize handle at bottom of embed so you can drag-resize the height */
