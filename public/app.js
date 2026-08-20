@@ -1160,14 +1160,15 @@
       });
     });
 
-    // 5. Ensure any previously saved embed whose iframe had a broken src gets restored
+    // 5. Ensure any previously saved embed whose iframe had a broken src gets upgraded
     pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
       const iframe = embed.querySelector('.nb-live-embed__iframe');
       const url = embed.dataset.url;
       if (iframe && url) {
+        const expectedSrc = getIframeSrcForUrl(url);
         const curSrc = iframe.getAttribute('src') || '';
-        if (!curSrc || curSrc.startsWith('/search') || curSrc.includes('undefined')) {
-          iframe.src = getIframeSrcForUrl(url);
+        if (!curSrc || curSrc.includes('youtube.com/') || curSrc.startsWith('/search') || curSrc.includes('undefined') || curSrc !== expectedSrc) {
+          iframe.src = expectedSrc;
         }
       }
     });
@@ -1230,18 +1231,27 @@
 
   function getIframeSrcForUrl(url) {
     if (!url) return '/api/proxy?url=about:blank';
-    const ytId = parseYouTubeId(url);
+    const trimmed = url.trim();
+    const ytId = parseYouTubeId(trimmed);
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
     }
-    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test((url || '').trim())) {
+    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
       return `https://www.youtube-nocookie.com/embed?listType=search&list=trending`;
     }
-    const vimeoId = parseVimeoId(url);
+    // Google search and root: route through iframe-friendly search
+    if (/^(?:https?:\/\/)?(?:www\.)?google\.com\/?$/i.test(trimmed)) {
+      return `https://duckduckgo.com/html/`;
+    }
+    const googleSearchMatch = trimmed.match(/(?:google\.com\/search\?(?:.*&)?q=)([^&]+)/i);
+    if (googleSearchMatch) {
+      return `https://duckduckgo.com/html/?q=${googleSearchMatch[1]}`;
+    }
+    const vimeoId = parseVimeoId(trimmed);
     if (vimeoId) {
       return `https://player.vimeo.com/video/${vimeoId}`;
     }
-    return '/api/proxy?url=' + encodeURIComponent(url);
+    return '/api/proxy?url=' + encodeURIComponent(trimmed);
   }
 
   function escapeHtml(s) {
