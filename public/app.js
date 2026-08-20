@@ -1326,17 +1326,17 @@
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
     }
-    // Root youtube.com — too JS-heavy to proxy; use DuckDuckGo video search
+    // Root youtube.com — too JS-heavy to proxy directly; route via proxy→DuckDuckGo video search
     if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
-      return 'https://duckduckgo.com/html/?q=trending+videos';
+      return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=trending+videos');
     }
-    // Google search and root: route through iframe-friendly search
+    // Google search and root: route through proxy→DuckDuckGo
     if (/^(?:https?:\/\/)?(?:www\.)?google\.com\/?$/i.test(trimmed)) {
-      return 'https://duckduckgo.com/html/';
+      return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/');
     }
     const googleSearchMatch = trimmed.match(/(?:google\.com\/search\?(?:.*&)?q=)([^&]+)/i);
     if (googleSearchMatch) {
-      return `https://duckduckgo.com/html/?q=${googleSearchMatch[1]}`;
+      return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=' + googleSearchMatch[1]);
     }
     const vimeoId = parseVimeoId(trimmed);
     if (vimeoId) {
