@@ -78,6 +78,7 @@
         </label>
         <button type="button" id="imageBtn" class="icon-btn" title="Insert image from file">🖼</button>
         <button type="button" id="linkBtn" class="icon-btn" title="Insert a live link">🔗</button>
+        <button type="button" id="searchEmbedBtn" class="icon-btn" title="Search the Web & Embed">🔍</button>
       </div>
 
       <div class="tool-group right">
@@ -199,6 +200,43 @@
             <button type="submit" class="brass-btn">Create Notebook</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- ============ SEARCH & EMBED MODAL ============ -->
+    <div id="searchModal" class="modal-overlay" hidden>
+      <div class="modal-backdrop" id="searchBackdrop"></div>
+      <div class="search-card">
+        <div class="modal-header">
+          <h2>🌐 Search Web & Embed Content</h2>
+          <button type="button" id="closeSearchModalBtn" class="modal-close-btn" title="Close">✕</button>
+        </div>
+        <p class="modal-subtitle">Search the live web or paste any URL (YouTube, Wikipedia, TradingView, Google, Docs) to embed inside your notebook.</p>
+        
+        <form id="searchForm" class="search-form">
+          <div class="search-input-group">
+            <input type="text" id="searchQueryInput" placeholder="Enter search query or paste URL (https://...)" required autocomplete="off" />
+            <button type="submit" class="brass-btn search-submit-btn">Search / Embed</button>
+          </div>
+        </form>
+
+        <div class="search-quick-links">
+          <span class="quick-label">Quick Embeds:</span>
+          <button type="button" class="quick-chip" data-url="https://en.wikipedia.org/wiki/Main_Page">Wikipedia</button>
+          <button type="button" class="quick-chip" data-url="https://www.youtube.com/watch?v=dQw4w9WgXcQ">YouTube</button>
+          <button type="button" class="quick-chip" data-url="https://www.tradingview.com/chart/">TradingView</button>
+          <button type="button" class="quick-chip" data-url="https://news.ycombinator.com">Hacker News</button>
+          <button type="button" class="quick-chip" data-url="https://www.google.com">Google</button>
+        </div>
+
+        <div class="search-results-wrapper" id="searchResultsWrapper" hidden>
+          <div class="search-results-header">Search Results:</div>
+          <div class="search-results-list" id="searchResultsList"></div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 14px; justify-content: flex-end;">
+          <button type="button" id="cancelSearchModalBtn" class="cancel-btn">Close</button>
+        </div>
       </div>
     </div>
 

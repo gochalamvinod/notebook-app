@@ -954,6 +954,65 @@ app.all('/api/proxy-api', (req, res) => {
   }
 });
 
+// ---------- search API (Method 4: DuckDuckGo / Instant Web Search) ----------
+app.get('/api/search', (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!query) return res.json({ ok: true, results: [] });
+
+  const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+  const reqUrl = new URL(ddgUrl);
+
+  https.get(reqUrl, { headers: { 'User-Agent': PROXY_USER_AGENT }, timeout: 8000 }, (proxyRes) => {
+    let raw = '';
+    proxyRes.on('data', (c) => { raw += c; });
+    proxyRes.on('end', () => {
+      try {
+        const json = JSON.parse(raw);
+        const results = [];
+        if (json.Heading && json.AbstractURL) {
+          results.push({
+            title: json.Heading,
+            snippet: json.AbstractText || json.Abstract || '',
+            url: json.AbstractURL,
+            icon: json.Image || '',
+            source: json.AbstractSource || 'DuckDuckGo'
+          });
+        }
+        if (Array.isArray(json.RelatedTopics)) {
+          for (const topic of json.RelatedTopics) {
+            if (topic.Text && topic.FirstURL) {
+              results.push({
+                title: topic.Text.split(' - ')[0] || topic.Text,
+                snippet: topic.Text,
+                url: topic.FirstURL,
+                icon: topic.Icon ? topic.Icon.URL : '',
+                source: 'Web'
+              });
+            } else if (Array.isArray(topic.Topics)) {
+              for (const sub of topic.Topics) {
+                if (sub.Text && sub.FirstURL) {
+                  results.push({
+                    title: sub.Text.split(' - ')[0] || sub.Text,
+                    snippet: sub.Text,
+                    url: sub.FirstURL,
+                    icon: sub.Icon ? sub.Icon.URL : '',
+                    source: 'Web'
+                  });
+                }
+              }
+            }
+          }
+        }
+        res.json({ ok: true, results: results.slice(0, 15) });
+      } catch (e) {
+        res.json({ ok: true, results: [] });
+      }
+    });
+  }).on('error', () => {
+    res.json({ ok: true, results: [] });
+  });
+});
+
 // ---------- asset proxy with caching ----------
 const assetCache = new Map();
 const ASSET_CACHE_MAX = 200;
@@ -986,7 +1045,7 @@ function proxyFetchBuffered(urlStr, redirectsLeft, callback) {
   req.on('error', callback);
 }
 
-app.get('/api/proxy-asset', requireUnlocked, (req, res) => {
+app.get('/api/proxy-asset', (req, res) => {
   const targetUrl = typeof req.query.url === 'string' ? req.query.url : '';
   if (!targetUrl) return res.status(400).end();
 

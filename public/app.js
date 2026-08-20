@@ -1446,6 +1446,148 @@
     scheduleSave();
   });
 
+  // ---------- Search & Embed Modal wiring ----------
+  const searchEmbedBtn = document.getElementById('searchEmbedBtn');
+  const searchModal = document.getElementById('searchModal');
+  const searchBackdrop = document.getElementById('searchBackdrop');
+  const closeSearchModalBtn = document.getElementById('closeSearchModalBtn');
+  const cancelSearchModalBtn = document.getElementById('cancelSearchModalBtn');
+  const searchForm = document.getElementById('searchForm');
+  const searchQueryInput = document.getElementById('searchQueryInput');
+  const searchResultsWrapper = document.getElementById('searchResultsWrapper');
+  const searchResultsList = document.getElementById('searchResultsList');
+
+  function openSearchModal() {
+    if (!searchModal) return;
+    searchModal.hidden = false;
+    searchQueryInput.value = '';
+    searchResultsWrapper.hidden = true;
+    searchResultsList.innerHTML = '';
+    setTimeout(() => searchQueryInput.focus(), 50);
+  }
+
+  function closeSearchModal() {
+    if (!searchModal) return;
+    searchModal.hidden = true;
+  }
+
+  if (searchEmbedBtn) searchEmbedBtn.addEventListener('click', openSearchModal);
+  if (closeSearchModalBtn) closeSearchModalBtn.addEventListener('click', closeSearchModal);
+  if (cancelSearchModalBtn) cancelSearchModalBtn.addEventListener('click', closeSearchModal);
+  if (searchBackdrop) searchBackdrop.addEventListener('click', closeSearchModal);
+
+  // Quick chips
+  document.querySelectorAll('.quick-chip').forEach(chip => {
+    chip.addEventListener('click', async () => {
+      const url = chip.dataset.url;
+      if (!url) return;
+      closeSearchModal();
+      activePageEl.focus();
+      restoreSelection();
+      const html = await buildUrlInsertHTML(url);
+      document.execCommand('insertHTML', false, html);
+      syncSpreadFromDOM();
+      scheduleSave();
+    });
+  });
+
+  if (searchForm) {
+    searchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const query = searchQueryInput.value.trim();
+      if (!query) return;
+
+      // If user entered a direct URL, embed it immediately
+      if (/^https?:\/\//i.test(query)) {
+        closeSearchModal();
+        activePageEl.focus();
+        restoreSelection();
+        const html = await buildUrlInsertHTML(query);
+        document.execCommand('insertHTML', false, html);
+        syncSpreadFromDOM();
+        scheduleSave();
+        return;
+      }
+
+      // Otherwise, perform live web search
+      searchResultsWrapper.hidden = false;
+      searchResultsList.innerHTML = '<div style="color: var(--brass); padding: 10px;">Searching web...</div>';
+
+      try {
+        const res = await fetch('/api/search?q=' + encodeURIComponent(query));
+        const data = await res.json();
+        if (data && data.ok && Array.isArray(data.results) && data.results.length > 0) {
+          searchResultsList.innerHTML = '';
+          data.results.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'search-result-item';
+            div.innerHTML = `
+              <div class="search-result-title">${escapeHtml(item.title)}</div>
+              <div class="search-result-snippet">${escapeHtml(item.snippet || item.url)}</div>
+              <div class="search-result-actions">
+                <button type="button" class="search-action-btn btn-embed-live" data-url="${escapeAttr(item.url)}">🌐 Embed Live Web</button>
+                <button type="button" class="search-action-btn btn-embed-preview" data-url="${escapeAttr(item.url)}">📰 Embed Preview</button>
+                <a href="${escapeAttr(item.url)}" target="_blank" rel="noopener noreferrer" class="search-action-btn">↗ Open</a>
+              </div>
+            `;
+            searchResultsList.appendChild(div);
+          });
+
+          // Wire action buttons
+          searchResultsList.querySelectorAll('.btn-embed-live').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const url = btn.dataset.url;
+              closeSearchModal();
+              activePageEl.focus();
+              restoreSelection();
+              const html = await buildUrlInsertHTML(url);
+              document.execCommand('insertHTML', false, html);
+              syncSpreadFromDOM();
+              scheduleSave();
+            });
+          });
+
+          searchResultsList.querySelectorAll('.btn-embed-preview').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const url = btn.dataset.url;
+              closeSearchModal();
+              activePageEl.focus();
+              restoreSelection();
+              const html = await buildUrlInsertHTML(url);
+              document.execCommand('insertHTML', false, html);
+              syncSpreadFromDOM();
+              scheduleSave();
+            });
+          });
+        } else {
+          searchResultsList.innerHTML = `
+            <div style="padding: 12px; color: var(--parchment-light);">
+              No direct instant answers found. 
+              <button type="button" class="brass-btn" style="margin-top: 8px; display: block;" id="embedDirectSearchBtn">
+                Embed Search for "${escapeHtml(query)}"
+              </button>
+            </div>
+          `;
+          const embedDirectBtn = document.getElementById('embedDirectSearchBtn');
+          if (embedDirectBtn) {
+            embedDirectBtn.addEventListener('click', async () => {
+              const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+              closeSearchModal();
+              activePageEl.focus();
+              restoreSelection();
+              const html = await buildUrlInsertHTML(searchUrl);
+              document.execCommand('insertHTML', false, html);
+              syncSpreadFromDOM();
+              scheduleSave();
+            });
+          }
+        }
+      } catch (err) {
+        searchResultsList.innerHTML = '<div style="color: var(--danger); padding: 10px;">Search request failed. Please check network.</div>';
+      }
+    });
+  }
+
   // ---------- title + autosave ----------
   if (titleInput) {
     titleInput.addEventListener('input', () => {
