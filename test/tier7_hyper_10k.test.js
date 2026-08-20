@@ -106,15 +106,17 @@ function getIframeSrcForUrl(url) {
   if (cloudDoc && cloudDoc.embedUrl) {
     return cloudDoc.embedUrl;
   }
+  // Root youtube.com — interactive built-in YouTube player portal
   if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
-    return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=trending+videos');
+    return '/api/portal/youtube';
   }
+  // Google search and root — interactive built-in search portal
   if (/^(?:https?:\/\/)?(?:www\.)?google\.com\/?$/i.test(trimmed)) {
-    return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/');
+    return '/api/portal/search';
   }
   const googleSearchMatch = trimmed.match(/(?:google\.com\/search\?(?:.*&)?q=)([^&]+)/i);
   if (googleSearchMatch) {
-    return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=' + googleSearchMatch[1]);
+    return '/api/portal/search?q=' + encodeURIComponent(googleSearchMatch[1]);
   }
   const vimeoId = parseVimeoId(trimmed);
   if (vimeoId) {

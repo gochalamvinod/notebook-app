@@ -64,14 +64,14 @@ function getIframeSrcForUrl(url) {
     const u = new URL(url);
     const host = u.hostname.replace(/^www\./i, '');
     if (host === 'youtube.com' && u.pathname === '/') {
-        return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=trending+videos');
+        return '/api/portal/youtube';
     }
     if (host === 'google.com' && u.pathname === '/') {
-        return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/');
+        return '/api/portal/search';
     }
     if (host === 'google.com' && u.pathname === '/search') {
         const q = u.searchParams.get('q');
-        return '/api/proxy?url=' + encodeURIComponent('https://duckduckgo.com/html/?q=' + (q || ''));
+        return '/api/portal/search?q=' + encodeURIComponent(q || '');
     }
   } catch (e) {}
 
@@ -334,7 +334,7 @@ describe('Section 2: getIframeSrcForUrl Routing (100+ tests)', () => {
     test(`Root YouTube proxy routing ${i}`, () => {
       const url = `https://youtube.com/`;
       const src = getIframeSrcForUrl(url);
-      assert.equal(src, `/api/proxy?url=${encodeURIComponent('https://duckduckgo.com/html/?q=trending+videos')}`);
+      assert.equal(src, '/api/portal/youtube');
     });
   }
 
@@ -342,7 +342,7 @@ describe('Section 2: getIframeSrcForUrl Routing (100+ tests)', () => {
     test(`Root Google proxy routing ${i}`, () => {
       const url = `https://google.com/`;
       const src = getIframeSrcForUrl(url);
-      assert.equal(src, `/api/proxy?url=${encodeURIComponent('https://duckduckgo.com/html/')}`);
+      assert.equal(src, '/api/portal/search');
     });
   }
 
@@ -350,7 +350,7 @@ describe('Section 2: getIframeSrcForUrl Routing (100+ tests)', () => {
     test(`Google Search proxy routing ${i}`, () => {
       const url = `https://www.google.com/search?q=test${i}`;
       const src = getIframeSrcForUrl(url);
-      assert.equal(src, `/api/proxy?url=${encodeURIComponent('https://duckduckgo.com/html/?q=test' + i)}`);
+      assert.equal(src, `/api/portal/search?q=${encodeURIComponent('test' + i)}`);
     });
   }
   

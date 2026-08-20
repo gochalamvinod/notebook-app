@@ -996,6 +996,266 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
   });
 }
 
+// Built-in interactive YouTube & Web Search Portals
+app.get('/api/portal/youtube', (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.set('X-Frame-Options', 'ALLOWALL');
+  res.set('Access-Control-Allow-Origin', '*');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Player Portal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    background: #181818;
+    color: #f1f1f1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .header {
+    background: #202020;
+    border-bottom: 1px solid #333;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo { font-weight: bold; color: #ff0000; font-size: 1.1rem; display: flex; align-items: center; gap: 4px; }
+  .search-box {
+    flex: 1;
+    display: flex;
+    background: #121212;
+    border: 1px solid #444;
+    border-radius: 20px;
+    padding: 2px 10px;
+  }
+  .search-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 0.85rem;
+    outline: none;
+    padding: 4px 6px;
+  }
+  .search-box button {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  .search-box button:hover { color: #fff; }
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 12px;
+  }
+  .chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 16px;
+    color: #ddd;
+    font-size: 0.78rem;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .chip:hover { background: #ff0000; color: #fff; border-color: #ff0000; }
+  .player-frame {
+    flex: 1;
+    width: 100%;
+    min-height: 240px;
+    border: none;
+    border-radius: 8px;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">▶ YouTube</div>
+  <form class="search-box" id="ytForm">
+    <input type="text" id="ytInput" placeholder="Paste YouTube link or enter video ID (e.g. dQw4w9WgXcQ)..." />
+    <button type="submit">🔍</button>
+  </form>
+</div>
+<div class="content">
+  <div class="chips">
+    <span class="chip" data-id="jfKfPfyJRdk">🎵 Lofi Hip Hop</span>
+    <span class="chip" data-id="5qap5aO4i9A">☕ Chill Lofi Beats</span>
+    <span class="chip" data-id="dQw4w9WgXcQ">🕺 Rick Astley</span>
+    <span class="chip" data-id="WPni755-Krg">🎹 Relaxing Piano</span>
+    <span class="chip" data-id="21X5lGlDOfg">🚀 NASA Space Live</span>
+  </div>
+  <iframe id="mainPlayer" class="player-frame" src="https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=0&rel=0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+</div>
+<script>
+  const form = document.getElementById('ytForm');
+  const input = document.getElementById('ytInput');
+  const player = document.getElementById('mainPlayer');
+
+  function extractId(val) {
+    if (!val) return null;
+    const m = val.match(/(?:youtube\\.com\\/(?:watch\\?(?:.*&)?v=|shorts\\/|embed\\/|v\\/)|youtu\\.be\\/|youtube-nocookie\\.com\\/embed\\/)([\\w-]{6,})/i);
+    if (m) return m[1];
+    if (/^[\\w-]{6,12}$/.test(val.trim())) return val.trim();
+    return null;
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const id = extractId(input.value);
+    if (id) {
+      player.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+    } else {
+      player.src = 'https://www.youtube-nocookie.com/embed?listType=search&list=' + encodeURIComponent(input.value.trim());
+    }
+  });
+
+  document.querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      const id = c.dataset.id;
+      if (id) {
+        player.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+      }
+    });
+  });
+</script>
+</body>
+</html>`;
+  res.send(html);
+});
+
+app.get('/api/portal/search', (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q : '';
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.set('X-Frame-Options', 'ALLOWALL');
+  res.set('Access-Control-Allow-Origin', '*');
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Search Portal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    background: #fdfbf7;
+    color: #2c2416;
+    padding: 16px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .search-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .search-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #c9b68a;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    outline: none;
+    background: #fff;
+  }
+  .search-btn {
+    background: #b8935a;
+    color: #fff;
+    border: 1px solid #9c7b45;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .results {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .result-card {
+    background: #f4edde;
+    border: 1px solid #dfd3ba;
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+  .result-title { font-weight: bold; font-size: 0.95rem; color: #2c2416; margin-bottom: 4px; }
+  .result-title a { color: #8b5a2b; text-decoration: none; }
+  .result-title a:hover { text-decoration: underline; }
+  .result-snippet { font-size: 0.82rem; color: #5a4b35; line-height: 1.35; }
+</style>
+</head>
+<body>
+<form class="search-bar" id="sForm">
+  <input type="text" class="search-input" id="sInput" value="${escapeHtml(query)}" placeholder="Search the web..." />
+  <button type="submit" class="search-btn">Search</button>
+</form>
+<div class="results" id="resultsList">
+  <div style="color: #7a6b55; font-size: 0.88rem;">Type a query above to search.</div>
+</div>
+<script>
+  const form = document.getElementById('sForm');
+  const input = document.getElementById('sInput');
+  const results = document.getElementById('resultsList');
+
+  async function doSearch(q) {
+    if (!q) return;
+    results.innerHTML = '<div style="color: #b8935a;">Searching...</div>';
+    try {
+      const res = await fetch('/api/search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      if (data && data.ok && data.results && data.results.length > 0) {
+        results.innerHTML = '';
+        data.results.forEach(r => {
+          const div = document.createElement('div');
+          div.className = 'result-card';
+          div.innerHTML = '<div class="result-title"><a href="' + (r.url||'#') + '" target="_blank">' + (r.title||'') + '</a></div>' +
+                          '<div class="result-snippet">' + (r.snippet||'') + '</div>';
+          results.appendChild(div);
+        });
+      } else {
+        results.innerHTML = '<div style="color: #7a6b55;">No direct instant results found. <a href="https://www.google.com/search?q=' + encodeURIComponent(q) + '" target="_blank">Search on Google ↗</a></div>';
+      }
+    } catch(e) {
+      results.innerHTML = '<div style="color: #c9302c;">Search failed. Please check network.</div>';
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    doSearch(input.value.trim());
+  });
+
+  if (input.value.trim()) doSearch(input.value.trim());
+</script>
+</body>
+</html>`;
+  res.send(html);
+});
+
 app.get('/api/proxy', (req, res) => {
   const targetUrl = typeof req.query.url === 'string' ? req.query.url : '';
   if (!targetUrl) return res.status(400).json({ error: 'Missing url parameter' });
