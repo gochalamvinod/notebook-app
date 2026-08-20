@@ -49,6 +49,12 @@ const TIERS = [
     file: 'test/tier5_adversarial_stress.test.js',
     minTests: 15,
   },
+  {
+    tier: 'Tier 6',
+    name: 'Mega Comprehensive Tests',
+    file: 'test/tier6_mega_comprehensive.test.js',
+    minTests: 1000,
+  },
 ];
 
 async function runTestFile(file) {
