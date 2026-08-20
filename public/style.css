@@ -62,16 +62,17 @@ button, input, select {
 
 .lock-card {
   width: 100%;
-  max-width: 360px;
+  max-width: 440px;
   background: linear-gradient(160deg, var(--cover-mid), var(--cover-dark) 75%);
-  border-radius: 10px;
-  padding: 40px 32px 32px;
+  border-radius: 12px;
+  padding: 36px 28px 28px;
   text-align: center;
   box-shadow:
     0 30px 60px rgba(0, 0, 0, 0.55),
     0 0 0 1px rgba(184, 147, 90, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   position: relative;
+  transition: max-width 0.3s ease;
 }
 
 .lock-card::before {
@@ -79,7 +80,7 @@ button, input, select {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background-image:
     repeating-linear-gradient(115deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px);
   opacity: 0.5;
@@ -103,7 +104,7 @@ button, input, select {
 .clasp.open { color: var(--brass-bright); }
 
 .lock-card h1 {
-  font-size: 1.5rem;
+  font-size: 1.45rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   margin: 6px 0 4px;
@@ -112,39 +113,299 @@ button, input, select {
 
 .lock-sub {
   color: rgba(244, 237, 222, 0.65);
-  font-size: 0.9rem;
-  margin: 0 0 24px;
+  font-size: 0.88rem;
+  margin: 0 0 16px;
 }
+
+/* ---------------- Lock Navigation Tabs ---------------- */
+
+.lock-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 18px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(184, 147, 90, 0.25);
+}
+
+.lock-tab-btn {
+  flex: 1;
+  padding: 8px 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(244, 237, 222, 0.7);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.lock-tab-btn:hover {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lock-tab-btn.active {
+  color: #241a0d;
+  background: linear-gradient(180deg, var(--brass-bright), var(--brass-dark));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.lock-tab-view {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.lock-tab-view[hidden] {
+  display: none !important;
+}
+
+/* ---------------- All Notebooks Showcase in Lock Screen ---------------- */
+
+.lock-shelf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.shelf-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brass-bright);
+  font-weight: 600;
+}
+
+.brass-link-btn {
+  background: none;
+  border: none;
+  color: var(--brass-bright);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+
+.brass-link-btn:hover {
+  color: #fff;
+  filter: brightness(1.2);
+}
+
+.lock-notebooks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 270px;
+  overflow-y: auto;
+  padding-right: 2px;
+  margin-bottom: 6px;
+}
+
+.lock-book-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(184, 147, 90, 0.25);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  gap: 10px;
+}
+
+.lock-book-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--brass);
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.lock-book-card.selected {
+  border-color: var(--brass-bright);
+  background: rgba(184, 147, 90, 0.15);
+  box-shadow: 0 0 0 2px rgba(184, 147, 90, 0.3);
+}
+
+.lock-book-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.lock-book-spine-mini {
+  width: 14px;
+  height: 40px;
+  border-radius: 3px;
+  box-shadow: inset -2px 0 3px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+
+.lock-book-spine-mini.spine-brown { background: linear-gradient(90deg, #5a3d28, #3b271a); }
+.lock-book-spine-mini.spine-green { background: linear-gradient(90deg, #2a5a3b, #183824); }
+.lock-book-spine-mini.spine-navy { background: linear-gradient(90deg, #2a3d66, #16223b); }
+.lock-book-spine-mini.spine-burgundy { background: linear-gradient(90deg, #66222a, #3b1418); }
+.lock-book-spine-mini.spine-black { background: linear-gradient(90deg, #383838, #151515); }
+
+.lock-book-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lock-book-title {
+  color: var(--paper);
+  font-size: 0.92rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lock-book-meta {
+  color: rgba(244, 237, 222, 0.6);
+  font-size: 0.74rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lock-book-owner-badge {
+  display: inline-block;
+  background: rgba(184, 147, 90, 0.2);
+  color: var(--brass-bright);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.lock-book-open-btn {
+  background: rgba(184, 147, 90, 0.15);
+  color: var(--brass-bright);
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.lock-book-open-btn:hover {
+  background: linear-gradient(180deg, var(--brass-bright), var(--brass-dark));
+  color: #241a0d;
+}
+
+/* ---------------- Selected Notebook Banner in Login Form ---------------- */
+
+.selected-notebook-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(184, 147, 90, 0.14);
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.banner-spine {
+  width: 10px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--brass);
+  flex-shrink: 0;
+}
+
+.banner-info {
+  flex: 1;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.banner-title {
+  color: var(--paper);
+  font-size: 0.86rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.banner-owner {
+  color: var(--brass-bright);
+  font-size: 0.72rem;
+}
+
+.banner-clear-btn {
+  background: none;
+  border: none;
+  color: rgba(244, 237, 222, 0.6);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.banner-clear-btn:hover {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------------- Forms & Password Input Wrapper ---------------- */
 
 .lock-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+}
+
+.create-user-form {
+  gap: 10px;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   text-align: left;
 }
 
 .field span {
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--brass-bright);
+  font-weight: 600;
 }
 
 .field input {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(184, 147, 90, 0.35);
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   color: var(--paper);
-  font-size: 1rem;
+  font-size: 0.95rem;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .field input:focus {
@@ -152,8 +413,121 @@ button, input, select {
   box-shadow: 0 0 0 3px rgba(184, 147, 90, 0.18);
 }
 
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrapper input {
+  padding-right: 40px;
+}
+
+.toggle-password-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: rgba(244, 237, 222, 0.65);
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, transform 0.1s;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-password-btn:hover {
+  color: var(--brass-bright);
+  transform: scale(1.15);
+}
+
+.show-password-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: rgba(244, 237, 222, 0.75);
+  cursor: pointer;
+  margin: 2px 0 4px;
+  user-select: none;
+}
+
+.show-password-checkbox-label input {
+  accent-color: var(--brass);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.cover-color-palette--compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.cover-color-palette--compact .color-choice {
+  margin: 0;
+}
+
+.cover-color-palette--compact .cover-chip {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  border-radius: 4px;
+}
+
+.lock-card-footer-switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 0.8rem;
+  color: rgba(244, 237, 222, 0.65);
+}
+
+.brass-text-link {
+  background: none;
+  border: none;
+  color: var(--brass-bright);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0;
+}
+
+.brass-text-link:hover {
+  color: #fff;
+  filter: brightness(1.2);
+}
+
+.current-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  color: var(--brass-bright);
+  font-weight: 600;
+  user-select: none;
+}
+
+.current-user-badge .user-icon {
+  font-size: 0.85rem;
+}
+
 .brass-btn {
-  margin-top: 6px;
+  margin-top: 4px;
   background: linear-gradient(180deg, var(--brass-bright), var(--brass-dark));
   color: #241a0d;
   border: none;
@@ -163,11 +537,12 @@ button, input, select {
   font-weight: 600;
   letter-spacing: 0.02em;
   cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
   transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
 }
+
 .brass-btn:hover { filter: brightness(1.08); }
-.brass-btn:active { transform: translateY(1px); box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+.brass-btn:active { transform: translateY(1px); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); }
 
 .lock-error {
   min-height: 1.1em;

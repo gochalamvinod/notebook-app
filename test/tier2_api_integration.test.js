@@ -934,4 +934,104 @@ describe('Tier 2: API Integration Tests', () => {
       assert.equal(invalidRangeRes.status, 416, 'Out of bounds range must return 416 Range Not Satisfiable');
     });
   });
+
+  describe('Multi-User Support & Public Library Showcase', () => {
+    let multiServer;
+    const userA = 'alice';
+    const passA = 'AlicePassword123!';
+    const userB = 'bob';
+    const passB = 'BobPassword456!';
+
+    before(async () => {
+      multiServer = await spawnTestServer();
+    });
+
+    after(async () => {
+      if (multiServer) await multiServer.stop();
+    });
+
+    test('GET /api/library returns empty/initial list before registration', async () => {
+      const res = await fetch(`${multiServer.baseUrl}/api/library`);
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, true);
+      assert.ok(Array.isArray(json.notebooks));
+      assert.ok(Array.isArray(json.users));
+    });
+
+    test('POST /api/users/register creates user Alice with custom title and cover', async () => {
+      const res = await fetch(`${multiServer.baseUrl}/api/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: userA,
+          password: passA,
+          notebookTitle: "Alice's Secret Journal",
+          coverColor: 'navy',
+        }),
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, true);
+      assert.equal(json.user, userA);
+      assert.equal(json.notebook.title, "Alice's Secret Journal");
+      assert.equal(json.notebook.coverColor, 'navy');
+    });
+
+    test('POST /api/users/register creates user Bob with distinct credentials', async () => {
+      const res = await fetch(`${multiServer.baseUrl}/api/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: userB,
+          password: passB,
+          notebookTitle: "Bob's Trading Log",
+          coverColor: 'green',
+        }),
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, true);
+      assert.equal(json.user, userB);
+      assert.equal(json.notebook.title, "Bob's Trading Log");
+      assert.equal(json.notebook.coverColor, 'green');
+    });
+
+    test('GET /api/library lists notebooks from both Alice and Bob', async () => {
+      const res = await fetch(`${multiServer.baseUrl}/api/library`);
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, true);
+      assert.ok(json.notebooks.length >= 2);
+      const aliceBook = json.notebooks.find((b) => b.owner === userA);
+      const bobBook = json.notebooks.find((b) => b.owner === userB);
+      assert.ok(aliceBook, 'Alice notebook should be in public library');
+      assert.equal(aliceBook.title, "Alice's Secret Journal");
+      assert.equal(aliceBook.coverColor, 'navy');
+      assert.ok(bobBook, 'Bob notebook should be in public library');
+      assert.equal(bobBook.title, "Bob's Trading Log");
+      assert.equal(bobBook.coverColor, 'green');
+    });
+
+    test('User login verifies credentials and isolates vaults', async () => {
+      // Bob tries to login with Alice password -> fails
+      const badLogin = await fetch(`${multiServer.baseUrl}/api/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: userB, password: passA }),
+      });
+      assert.equal(badLogin.status, 401);
+
+      // Alice logs in with correct password -> succeeds
+      const aliceLogin = await fetch(`${multiServer.baseUrl}/api/users/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: userA, password: passA }),
+      });
+      assert.equal(aliceLogin.status, 200);
+      const aliceJson = await aliceLogin.json();
+      assert.equal(aliceJson.user, userA);
+      assert.equal(aliceJson.notebook.title, "Alice's Secret Journal");
+    });
+  });
 });

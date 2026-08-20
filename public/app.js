@@ -18,7 +18,21 @@
   const lockSubtitle = document.getElementById('lockSubtitle');
   const lockBookCountBadge = document.getElementById('lockBookCountBadge');
   const lockBookCountText = document.getElementById('lockBookCountText');
+  const tabAllNotebooks = document.getElementById('tabAllNotebooks');
+  const tabLogin = document.getElementById('tabLogin');
+  const tabCreateUser = document.getElementById('tabCreateUser');
+  const viewAllNotebooks = document.getElementById('viewAllNotebooks');
+  const viewLogin = document.getElementById('viewLogin');
+  const viewCreateUser = document.getElementById('viewCreateUser');
+  const lockNotebooksList = document.getElementById('lockNotebooksList');
+  const shelfCreateBtn = document.getElementById('shelfCreateBtn');
+  const selectedNotebookBanner = document.getElementById('selectedNotebookBanner');
+  const bannerSpine = document.getElementById('bannerSpine');
+  const selectedNotebookTitle = document.getElementById('selectedNotebookTitle');
+  const selectedNotebookOwner = document.getElementById('selectedNotebookOwner');
+  const clearSelectedNotebookBtn = document.getElementById('clearSelectedNotebookBtn');
   const lockForm = document.getElementById('lockForm');
+  const usernameInput = document.getElementById('usernameInput');
   const passwordInput = document.getElementById('passwordInput');
   const confirmField = document.getElementById('confirmField');
   const confirmInput = document.getElementById('confirmInput');
@@ -26,7 +40,20 @@
   const lockError = document.getElementById('lockError');
   const clasp = document.getElementById('clasp');
 
+  const createUserForm = document.getElementById('createUserForm');
+  const createUsernameInput = document.getElementById('createUsernameInput');
+  const createNotebookTitleInput = document.getElementById('createNotebookTitleInput');
+  const createPasswordInput = document.getElementById('createPasswordInput');
+  const createConfirmPasswordInput = document.getElementById('createConfirmPasswordInput');
+  const toggleShowAllPasswords = document.getElementById('toggleShowAllPasswords');
+  const createUserSubmit = document.getElementById('createUserSubmit');
+  const createUserError = document.getElementById('createUserError');
+  const switchToCreateUserBtn = document.getElementById('switchToCreateUserBtn');
+  const switchToLoginBtn = document.getElementById('switchToLoginBtn');
+
   const appEl = document.getElementById('app');
+  const currentUserBadge = document.getElementById('currentUserBadge');
+  const currentUserName = document.getElementById('currentUserName');
   const bookshelfBtn = document.getElementById('bookshelfBtn');
   const currentBookTitle = document.getElementById('currentBookTitle');
   const bookshelfModal = document.getElementById('bookshelfModal');
@@ -115,6 +142,7 @@
   // ---------- state ----------
   let notebook = null;
   let vault = null;
+  let currentUser = 'default';
   let leftIndex = 0;       // index of the page shown in the LEFT slot; always even
   let activeSlot = 'left'; // 'left' | 'right' — whichever page last had focus
   let activePageEl = null;
@@ -122,6 +150,8 @@
   let saveTimer = null;
   let savedRange = null;
   let mode = 'unlock'; // or 'setup'
+  let selectedBookId = null;
+  let selectedBookOwner = null;
 
   let lockoutTimer = null;
 
@@ -156,11 +186,177 @@
     lockoutTimer = setInterval(update, 1000);
   }
 
+  // ---------- Tab Navigation & Password Visibility Toggles ----------
+  function switchLockTab(tabName) {
+    const tabs = [
+      { name: 'notebooks', btn: tabAllNotebooks, view: viewAllNotebooks },
+      { name: 'login', btn: tabLogin, view: viewLogin },
+      { name: 'create', btn: tabCreateUser, view: viewCreateUser },
+    ];
+
+    tabs.forEach((t) => {
+      if (!t.btn || !t.view) return;
+      const isActive = t.name === tabName;
+      t.btn.classList.toggle('active', isActive);
+      t.btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      t.view.hidden = !isActive;
+    });
+
+    if (tabName === 'notebooks') {
+      refreshLockNotebooksList();
+    } else if (tabName === 'login') {
+      if (passwordInput) passwordInput.focus();
+    } else if (tabName === 'create') {
+      if (createUsernameInput) createUsernameInput.focus();
+    }
+  }
+
+  function wirePasswordToggles() {
+    document.querySelectorAll('.toggle-password-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetId = btn.dataset.target;
+        const input = document.getElementById(targetId);
+        if (!input) return;
+        if (input.type === 'password') {
+          input.type = 'text';
+          btn.textContent = '🙈';
+          btn.title = 'Hide password';
+        } else {
+          input.type = 'password';
+          btn.textContent = '👁️';
+          btn.title = 'Show password';
+        }
+      });
+    });
+
+    if (toggleShowAllPasswords) {
+      toggleShowAllPasswords.addEventListener('change', () => {
+        const show = toggleShowAllPasswords.checked;
+        const targetInputs = [createPasswordInput, createConfirmPasswordInput, passwordInput, confirmInput];
+        targetInputs.forEach((input) => {
+          if (input) input.type = show ? 'text' : 'password';
+        });
+        document.querySelectorAll('.toggle-password-btn').forEach((btn) => {
+          btn.textContent = show ? '🙈' : '👁️';
+          btn.title = show ? 'Hide password' : 'Show password';
+        });
+      });
+    }
+  }
+
+  function wireLockNavigation() {
+    if (tabAllNotebooks) tabAllNotebooks.addEventListener('click', () => switchLockTab('notebooks'));
+    if (tabLogin) tabLogin.addEventListener('click', () => switchLockTab('login'));
+    if (tabCreateUser) tabCreateUser.addEventListener('click', () => switchLockTab('create'));
+
+    if (shelfCreateBtn) shelfCreateBtn.addEventListener('click', () => switchLockTab('create'));
+    if (switchToCreateUserBtn) switchToCreateUserBtn.addEventListener('click', () => switchLockTab('create'));
+    if (switchToLoginBtn) switchToLoginBtn.addEventListener('click', () => switchLockTab('login'));
+
+    if (clearSelectedNotebookBtn) {
+      clearSelectedNotebookBtn.addEventListener('click', clearSelectedNotebook);
+    }
+  }
+
+  async function refreshLockNotebooksList() {
+    if (!lockNotebooksList) return;
+    lockNotebooksList.innerHTML = '<div style="text-align:center;color:rgba(244,237,222,0.6);padding:14px;">Loading library collection...</div>';
+    try {
+      const res = await fetch('/api/library');
+      const data = await res.json();
+      const notebooks = (data && data.notebooks) || [];
+
+      if (lockBookCountText) {
+        lockBookCountText.textContent = notebooks.length === 1 ? '1 Notebook in Library' : `${notebooks.length} Notebooks in Library`;
+      }
+      if (lockBookCountBadge) {
+        lockBookCountBadge.hidden = notebooks.length === 0;
+      }
+
+      if (notebooks.length === 0) {
+        lockNotebooksList.innerHTML = `
+          <div style="text-align:center;color:rgba(244,237,222,0.75);padding:18px 12px;background:rgba(0,0,0,0.25);border-radius:8px;border:1px dashed rgba(184,147,90,0.3);">
+            <div style="font-size:1.6rem;margin-bottom:6px;">📖</div>
+            <p style="margin:0 0 10px;font-size:0.9rem;">No notebooks found yet.</p>
+            <button type="button" class="brass-btn" style="padding:7px 14px;font-size:0.85rem;" id="emptyCreateBtn">Create Your First Notebook</button>
+          </div>
+        `;
+        const emptyCreateBtn = document.getElementById('emptyCreateBtn');
+        if (emptyCreateBtn) emptyCreateBtn.addEventListener('click', () => switchLockTab('create'));
+        return;
+      }
+
+      lockNotebooksList.innerHTML = '';
+      notebooks.forEach((b) => {
+        const card = document.createElement('div');
+        const isSelected = selectedBookId === b.id;
+        card.className = 'lock-book-card' + (isSelected ? ' selected' : '');
+        const spineClass = 'spine-' + (b.coverColor || 'brown');
+        const pageStr = (b.pageCount || 1) + ((b.pageCount === 1) ? ' page' : ' pages');
+        const owner = b.owner || 'default';
+        const updatedStr = b.updatedAt ? new Date(b.updatedAt).toLocaleDateString() : '';
+
+        card.innerHTML = `
+          <div class="lock-book-left">
+            <div class="lock-book-spine-mini ${spineClass}"></div>
+            <div class="lock-book-info">
+              <div class="lock-book-title">${escapeHtml(b.title || 'Untitled Notebook')}</div>
+              <div class="lock-book-meta">
+                <span class="lock-book-owner-badge">👤 ${escapeHtml(owner)}</span>
+                <span>${pageStr}</span>
+                ${updatedStr ? `<span>· ${updatedStr}</span>` : ''}
+              </div>
+            </div>
+          </div>
+          <button type="button" class="lock-book-open-btn">Open 🔓</button>
+        `;
+
+        card.addEventListener('click', () => {
+          selectNotebookForUnlock(b);
+        });
+
+        lockNotebooksList.appendChild(card);
+      });
+    } catch (e) {
+      lockNotebooksList.innerHTML = '<div style="text-align:center;color:var(--danger-bright);padding:14px;">Could not load library.</div>';
+    }
+  }
+
+  function selectNotebookForUnlock(book) {
+    selectedBookId = book.id;
+    selectedBookOwner = book.owner || 'default';
+    if (usernameInput) usernameInput.value = (selectedBookOwner !== 'default') ? selectedBookOwner : '';
+    if (selectedNotebookBanner) {
+      selectedNotebookBanner.hidden = false;
+      if (selectedNotebookTitle) selectedNotebookTitle.textContent = book.title || 'My Notebook';
+      if (selectedNotebookOwner) selectedNotebookOwner.textContent = `Owner: ${selectedBookOwner}`;
+      if (bannerSpine) {
+        bannerSpine.className = 'banner-spine spine-' + (book.coverColor || 'brown');
+      }
+    }
+    switchLockTab('login');
+    if (passwordInput) {
+      passwordInput.value = '';
+      passwordInput.focus();
+    }
+  }
+
+  function clearSelectedNotebook() {
+    selectedBookId = null;
+    selectedBookOwner = null;
+    if (selectedNotebookBanner) selectedNotebookBanner.hidden = true;
+    if (usernameInput) usernameInput.value = '';
+  }
+
   // ---------- init ----------
   async function init() {
     populateControls();
     wireBookshelf();
     wireEmojiPicker();
+    wirePasswordToggles();
+    wireLockNavigation();
+
     try {
       const res = await fetch('/api/status');
       const status = await res.json();
@@ -168,42 +364,33 @@
       if (status.unlocked) {
         const nbRes = await fetch('/api/notebook').then((r) => r.json());
         if (nbRes.ok) {
-          bootFromNotebook(nbRes.notebook, nbRes.vault);
+          bootFromNotebook(nbRes.notebook, nbRes.vault, status.currentUser);
           return;
         }
       }
 
       mode = status.setupNeeded ? 'setup' : 'unlock';
+      if (status.bookCount !== undefined && status.bookCount > 0) {
+        if (lockBookCountBadge) lockBookCountBadge.hidden = false;
+        if (lockBookCountText) {
+          lockBookCountText.textContent = status.bookCount === 1 ? '1 Notebook in Library' : `${status.bookCount} Notebooks in Library`;
+        }
+      }
+
       if (mode === 'setup') {
         lockTitle.textContent = 'Begin Your Notebook';
-        lockSubtitle.textContent = 'Choose a password. It encrypts everything you write — there is no way to recover your notes without it, so keep it somewhere safe.';
-        if (lockBookCountBadge) lockBookCountBadge.hidden = true;
-        confirmField.hidden = false;
-        confirmInput.required = true;
-        lockSubmit.textContent = 'Create Notebook';
+        lockSubtitle.textContent = 'Create a user and choose a password to encrypt your notebook.';
+        switchLockTab('create');
       } else {
-        lockTitle.textContent = 'Your Notebook';
-        lockSubtitle.textContent = 'Enter your password to open it.';
-        if (lockBookCountBadge) {
-          if (status.bookCount !== undefined && status.bookCount > 0) {
-            lockBookCountBadge.hidden = false;
-            if (lockBookCountText) {
-              lockBookCountText.textContent = status.bookCount === 1 ? '1 Notebook in Library' : `${status.bookCount} Notebooks in Library`;
-            }
-          } else {
-            lockBookCountBadge.hidden = true;
-          }
-        }
-        confirmField.hidden = true;
-        confirmInput.required = false;
-        lockSubmit.textContent = 'Unlock';
+        lockTitle.textContent = 'Leatherbound Library';
+        lockSubtitle.textContent = 'Browse library, log in, or create your notebook.';
+        refreshLockNotebooksList();
+        switchLockTab('notebooks');
       }
 
       if (status.lockedOut && status.remainingSeconds > 0) {
         startLockoutCountdown(status.remainingSeconds);
       }
-
-      passwordInput.focus();
     } catch (err) {
       lockSubtitle.textContent = 'Could not reach the server. Is it running?';
     }
@@ -364,7 +551,7 @@
       if (!data.ok) throw new Error(data.error);
 
       closeBookshelf();
-      bootFromNotebook(data.notebook, data.vault);
+      bootFromNotebook(data.notebook, data.vault, data.user || currentUser);
     } catch (err) {
       alert('Could not switch notebook: ' + err.message);
     }
@@ -384,7 +571,7 @@
 
       closeNewBook();
       closeBookshelf();
-      bootFromNotebook(data.notebook, data.vault);
+      bootFromNotebook(data.notebook, data.vault, data.user || currentUser);
     } catch (err) {
       alert('Could not create notebook: ' + err.message);
     }
@@ -426,7 +613,7 @@
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
 
-      bootFromNotebook(data.notebook, data.vault);
+      bootFromNotebook(data.notebook, data.vault, data.user || currentUser);
       await refreshBookshelfGrid();
     } catch (err) {
       alert('Could not delete notebook: ' + err.message);
@@ -438,9 +625,10 @@
     e.preventDefault();
     lockError.textContent = '';
     const password = passwordInput.value;
+    const username = usernameInput ? usernameInput.value.trim() : '';
 
     if (mode === 'setup') {
-      if (password !== confirmInput.value) {
+      if (password !== (confirmInput ? confirmInput.value : '')) {
         lockError.textContent = 'Passwords do not match.';
         shakeCard();
         return;
@@ -450,11 +638,63 @@
         shakeCard();
         return;
       }
-      await submitAuth('/api/setup', { password });
+      await submitAuth('/api/setup', { password, username });
     } else {
-      await submitAuth('/api/unlock', { password });
+      await submitAuth('/api/unlock', {
+        password,
+        username: username || selectedBookOwner || undefined,
+        bookId: selectedBookId || undefined,
+      });
     }
   });
+
+  if (createUserForm) {
+    createUserForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (createUserError) createUserError.textContent = '';
+      const username = createUsernameInput.value.trim();
+      const notebookTitle = createNotebookTitleInput.value.trim();
+      const password = createPasswordInput.value;
+      const confirmPassword = createConfirmPasswordInput.value;
+      const colorRadio = createUserForm.querySelector('input[name="createCoverColor"]:checked');
+      const coverColor = colorRadio ? colorRadio.value : 'brown';
+
+      if (password.length < 4) {
+        if (createUserError) createUserError.textContent = 'Password must be at least 4 characters.';
+        shakeCard();
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        if (createUserError) createUserError.textContent = 'Passwords do not match.';
+        shakeCard();
+        return;
+      }
+
+      if (createUserSubmit) createUserSubmit.disabled = true;
+      try {
+        const res = await fetch('/api/users/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, notebookTitle, coverColor, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (createUserError) createUserError.textContent = data.error || 'Could not create account.';
+          if (createUserSubmit) createUserSubmit.disabled = false;
+          shakeCard();
+          return;
+        }
+
+        clasp.classList.add('open');
+        await new Promise((r) => setTimeout(r, 450));
+        bootFromNotebook(data.notebook, data.vault, data.user);
+      } catch (err) {
+        if (createUserError) createUserError.textContent = 'Could not reach server.';
+        if (createUserSubmit) createUserSubmit.disabled = false;
+      }
+    });
+  }
 
   async function submitAuth(url, body) {
     lockSubmit.disabled = true;
@@ -477,7 +717,7 @@
       }
       clasp.classList.add('open');
       await new Promise((r) => setTimeout(r, 450));
-      bootFromNotebook(data.notebook, data.vault);
+      bootFromNotebook(data.notebook, data.vault, data.user);
     } catch (err) {
       lockError.textContent = 'Could not reach the server.';
       lockSubmit.disabled = false;
@@ -491,9 +731,10 @@
   }
 
   // ---------- boot main app ----------
-  function bootFromNotebook(nb, vaultData) {
+  function bootFromNotebook(nb, vaultData, user) {
     notebook = nb;
     if (vaultData) vault = vaultData;
+    currentUser = user || (vaultData && vaultData.user) || (notebook && notebook.owner) || 'default';
     leftIndex = 0;
     activeSlot = 'left';
     activePageEl = leftPageEl;
@@ -501,6 +742,7 @@
     appEl.hidden = false;
     if (currentBookTitle) currentBookTitle.textContent = notebook.title || 'My Notebook';
     if (titleInput) titleInput.value = notebook.title || 'My Notebook';
+    if (currentUserName) currentUserName.textContent = currentUser;
     applyCoverTheme(notebook.coverColor);
 
     setupPageEditable(leftPageEl, 'left');

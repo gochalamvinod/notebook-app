@@ -52,6 +52,8 @@ function resolveDataDir() {
 
 const DATA_DIR = resolveDataDir();
 const DATA_FILE = path.join(DATA_DIR, 'notebook.enc.json');
+const USERS_DIR = path.join(DATA_DIR, 'users');
+const INDEX_FILE = path.join(DATA_DIR, 'library_index.json');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
 // Generous body limits for large media & video files (up to 1GB raw binary / 500MB JSON).
@@ -63,6 +65,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 try {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(USERS_DIR)) fs.mkdirSync(USERS_DIR, { recursive: true });
   if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
   const bundledDir = path.join(__dirname, 'data');
   if (DATA_DIR !== bundledDir && fs.existsSync(bundledDir)) {
@@ -124,10 +127,11 @@ function decryptData(payload, key) {
 // ---------- Session Token Helper for Serverless Persistence ----------
 const SESSION_SECRET = crypto.createHash('sha256').update(process.env.SESSION_SECRET || 'leatherbound-master-session-salt-v3').digest();
 
-function encryptSessionToken(key) {
+function encryptSessionToken(key, username = 'default') {
+  const payload = Buffer.from(JSON.stringify({ key: key.toString('hex'), username }), 'utf8');
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', SESSION_SECRET, iv);
-  const encrypted = Buffer.concat([cipher.update(key), cipher.final()]);
+  const encrypted = Buffer.concat([cipher.update(payload), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return iv.toString('hex') + '.' + authTag.toString('hex') + '.' + encrypted.toString('hex');
 }
@@ -142,7 +146,18 @@ function decryptSessionToken(token) {
     const encrypted = Buffer.from(parts[2], 'hex');
     const decipher = crypto.createDecipheriv('aes-256-gcm', SESSION_SECRET, iv);
     decipher.setAuthTag(authTag);
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    const plaintext = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    try {
+      const parsed = JSON.parse(plaintext.toString('utf8'));
+      if (parsed && parsed.key) {
+        return {
+          key: Buffer.from(parsed.key, 'hex'),
+          username: parsed.username || 'default',
+        };
+      }
+    } catch (e) {}
+    // Fallback if legacy token was raw key buffer
+    return { key: plaintext, username: 'default' };
   } catch (e) {
     return null;
   }
@@ -157,26 +172,31 @@ function setSessionCookie(res, token, req) {
   res.set('Set-Cookie', `notebook_session=${cookieVal}; ${flags}`);
 }
 
-function getSessionKey(req) {
+function getSessionContext(req) {
   const cookieHeader = (req && req.headers && req.headers.cookie) || '';
   const match = cookieHeader.match(/(?:^|; )notebook_session=([^;]*)/);
   if (match) {
-    const key = decryptSessionToken(decodeURIComponent(match[1]));
-    if (key) {
-      sessionKey = key;
-      return key;
+    const ctx = decryptSessionToken(decodeURIComponent(match[1]));
+    if (ctx && ctx.key) {
+      sessionKey = ctx.key;
+      return ctx;
     }
   }
   return null;
 }
 
+function getSessionKey(req) {
+  const ctx = getSessionContext(req);
+  return ctx ? ctx.key : null;
+}
+
 // ---------- Multi-Book Vault Structure & Normalization ----------
 
-function emptyVault() {
+function emptyVault(initialTitle = 'My Notebook', initialCover = 'brown') {
   const initialBook = {
     id: 'book-' + Date.now(),
-    title: 'My Notebook',
-    coverColor: 'brown',
+    title: initialTitle,
+    coverColor: initialCover,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     pages: [
@@ -218,13 +238,142 @@ function getActiveBook(vault) {
   return vault.books.find((b) => b.id === vault.activeBookId) || vault.books[0];
 }
 
-function readFile() {
+function getUserFilePath(username) {
+  if (!username || username === 'default') {
+    return DATA_FILE;
+  }
+  const safeName = username.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+  return path.join(USERS_DIR, `${safeName}.enc.json`);
+}
+
+function readFile(username) {
+  if (username && username !== 'default') {
+    const userPath = getUserFilePath(username);
+    if (fs.existsSync(userPath)) {
+      return JSON.parse(fs.readFileSync(userPath, 'utf8'));
+    }
+  }
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 }
 
-function writeFile(salt, encrypted, bookCount) {
+function writeFile(salt, encrypted, bookCount, username = 'default') {
   const count = typeof bookCount === 'number' ? bookCount : (encrypted && encrypted.bookCount) || 1;
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ version: 2, salt, bookCount: count, ...encrypted }));
+  const filePath = getUserFilePath(username);
+  const data = JSON.stringify({ version: 2, salt, bookCount: count, username: username || 'default', ...encrypted });
+  fs.writeFileSync(filePath, data);
+  if (!username || username === 'default') {
+    if (filePath !== DATA_FILE) {
+      fs.writeFileSync(DATA_FILE, data);
+    }
+  }
+}
+
+// ---------- Public Library Index Helpers ----------
+
+function getLibraryIndex() {
+  if (fs.existsSync(INDEX_FILE)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8'));
+      if (parsed && Array.isArray(parsed.notebooks)) {
+        return parsed;
+      }
+    } catch (e) {}
+  }
+
+  const index = {
+    users: [],
+    notebooks: [],
+  };
+
+  // Inspect DATA_FILE
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      const file = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      const count = file.bookCount || (file.books ? file.books.length : 1);
+      const owner = file.username || 'default';
+      if (!index.users.some((u) => u.username.toLowerCase() === owner.toLowerCase())) {
+        index.users.push({ username: owner, displayName: owner === 'default' ? 'Default Vault' : owner });
+      }
+      for (let i = 0; i < count; i++) {
+        const id = i === 0 ? 'book-default' : `book-default-${i + 1}`;
+        const title = i === 0 ? 'My Notebook' : `Notebook ${i + 1}`;
+        if (!index.notebooks.some((b) => b.id === id)) {
+          index.notebooks.push({
+            id,
+            title,
+            coverColor: 'brown',
+            pageCount: 1,
+            owner,
+            updatedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Inspect USERS_DIR
+  if (fs.existsSync(USERS_DIR)) {
+    try {
+      const files = fs.readdirSync(USERS_DIR);
+      for (const file of files) {
+        if (file.endsWith('.enc.json')) {
+          const username = file.replace('.enc.json', '');
+          if (!index.users.some((u) => u.username.toLowerCase() === username.toLowerCase())) {
+            index.users.push({ username, displayName: username });
+          }
+          if (!index.notebooks.some((b) => b.owner && b.owner.toLowerCase() === username.toLowerCase())) {
+            index.notebooks.push({
+              id: `book-${username}`,
+              title: `${username}'s Notebook`,
+              coverColor: 'brown',
+              pageCount: 1,
+              owner: username,
+              updatedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  return index;
+}
+
+function saveLibraryIndex(index) {
+  try {
+    fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2));
+  } catch (e) {}
+}
+
+function syncVaultToLibraryIndex(vault, username = 'default') {
+  const index = getLibraryIndex();
+  const cleanUser = username || 'default';
+
+  if (!index.users.some((u) => u.username.toLowerCase() === cleanUser.toLowerCase())) {
+    index.users.push({ username: cleanUser, displayName: cleanUser === 'default' ? 'Default Vault' : cleanUser });
+  }
+
+  // Remove stale notebook entries for this user
+  index.notebooks = index.notebooks.filter((b) => (b.owner || 'default').toLowerCase() !== cleanUser.toLowerCase());
+
+  // Insert current notebooks
+  if (vault && Array.isArray(vault.books)) {
+    for (const b of vault.books) {
+      index.notebooks.push({
+        id: b.id,
+        title: b.title || 'Untitled Notebook',
+        coverColor: b.coverColor || 'brown',
+        pageCount: (b.pages || []).length,
+        owner: cleanUser,
+        updatedAt: b.updatedAt || new Date().toISOString(),
+        createdAt: b.createdAt || new Date().toISOString(),
+      });
+    }
+  }
+
+  saveLibraryIndex(index);
 }
 
 // ---------- AES-256-GCM Media Encryption on Disk ----------
@@ -315,16 +464,19 @@ let failedAttempts = 0;
 let lockedUntil = 0;
 
 function requireUnlocked(req, res, next) {
-  const key = getSessionKey(req);
-  if (!key) return res.status(401).json({ error: 'Notebook is locked.' });
-  req.sessionKey = key;
+  const ctx = getSessionContext(req);
+  if (!ctx || !ctx.key) return res.status(401).json({ error: 'Notebook is locked.' });
+  req.sessionKey = ctx.key;
+  req.currentUser = ctx.username || 'default';
   next();
 }
 
 app.get('/api/status', (req, res) => {
-  const key = getSessionKey(req);
-  let bookCount = 0;
-  if (fs.existsSync(DATA_FILE)) {
+  const ctx = getSessionContext(req);
+  const index = getLibraryIndex();
+
+  let bookCount = index.notebooks.length;
+  if (bookCount === 0 && fs.existsSync(DATA_FILE)) {
     try {
       const file = readFile();
       bookCount = file.bookCount || (file.books ? file.books.length : 1);
@@ -332,44 +484,79 @@ app.get('/api/status', (req, res) => {
       bookCount = 1;
     }
   }
+
+  const hasAnyVault = fs.existsSync(DATA_FILE) || (fs.existsSync(USERS_DIR) && fs.readdirSync(USERS_DIR).some((f) => f.endsWith('.enc.json')));
   const isLockedOut = Date.now() < lockedUntil;
   const remainingSeconds = isLockedOut ? Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
+
   res.json({
-    setupNeeded: !fs.existsSync(DATA_FILE),
-    unlocked: !!key,
+    setupNeeded: !hasAnyVault,
+    unlocked: !!(ctx && ctx.key),
+    currentUser: ctx ? ctx.username : null,
     bookCount,
+    notebooks: index.notebooks,
+    users: index.users,
     lockedOut: isLockedOut,
     remainingSeconds,
   });
 });
 
-app.post('/api/setup', (req, res) => {
-  if (fs.existsSync(DATA_FILE)) {
-    return res.status(400).json({ error: 'A notebook already exists on this machine. Unlock it instead.' });
-  }
-  const { password } = req.body || {};
+app.get('/api/library', (req, res) => {
+  const index = getLibraryIndex();
+  res.json({
+    ok: true,
+    notebooks: index.notebooks,
+    users: index.users,
+  });
+});
+
+function handleRegister(req, res) {
+  const { username, password, notebookTitle, coverColor } = req.body || {};
   if (!password || password.length < 4) {
     return res.status(400).json({ error: 'Choose a password with at least 4 characters.' });
   }
+
+  const cleanUsername = (username || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 30);
+  const user = cleanUsername || 'default';
+  const userFile = getUserFilePath(user);
+
+  // If registering a specific user that already exists
+  if (cleanUsername && fs.existsSync(userFile)) {
+    return res.status(400).json({ error: `User "${cleanUsername}" already exists. Unlock or choose another username.` });
+  }
+
+  // If default setup and DATA_FILE already exists and not a specific new user
+  if (!cleanUsername && fs.existsSync(DATA_FILE)) {
+    return res.status(400).json({ error: 'A notebook already exists on this machine. Unlock it instead.' });
+  }
+
   const salt = crypto.randomBytes(16).toString('hex');
   const key = deriveKey(password, salt);
-  const vault = emptyVault();
-  writeFile(salt, encryptData(vault, key), vault.books.length);
+  const vault = emptyVault(notebookTitle ? notebookTitle.trim().slice(0, 80) : 'My Notebook', coverColor || 'brown');
+
+  writeFile(salt, encryptData(vault, key), vault.books.length, user);
   sessionKey = key;
   failedAttempts = 0;
   lockedUntil = 0;
 
-  const token = encryptSessionToken(key);
+  syncVaultToLibraryIndex(vault, user);
+
+  const token = encryptSessionToken(key, user);
   setSessionCookie(res, token, req);
-  res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
-});
+  res.json({
+    ok: true,
+    user,
+    vault,
+    activeBookId: vault.activeBookId,
+    notebook: getActiveBook(vault),
+  });
+}
 
-app.post('/api/unlock', (req, res) => {
-  if (!fs.existsSync(DATA_FILE)) {
-    return res.status(400).json({ error: 'No notebook found yet. Set one up first.' });
-  }
+app.post('/api/setup', handleRegister);
+app.post('/api/users/register', handleRegister);
+app.post('/api/auth/register', handleRegister);
 
-  // Allow resetting lockout in test mode
+function handleLogin(req, res) {
   if (req.headers['x-reset-lockout']) {
     failedAttempts = 0;
     lockedUntil = 0;
@@ -386,43 +573,109 @@ app.post('/api/unlock', (req, res) => {
     });
   }
 
-  const { password } = req.body || {};
-  try {
-    const file = readFile();
-    const key = deriveKey(password || '', file.salt);
-    let raw = decryptData(file, key);
-    let vault = normalizeVault(raw);
-    sessionKey = key;
+  const { password, username, bookId } = req.body || {};
+  let targetUser = (username || '').trim();
+
+  // If bookId was provided, look up owner in library index
+  if (!targetUser && bookId) {
+    const index = getLibraryIndex();
+    const foundBook = index.notebooks.find((b) => b.id === bookId);
+    if (foundBook && foundBook.owner) {
+      targetUser = foundBook.owner;
+    }
+  }
+
+  // If no user specified, try targetUser = 'default' or scan available user vaults
+  let candidates = [];
+  if (targetUser) {
+    candidates.push(targetUser);
+  } else {
+    candidates.push('default');
+    if (fs.existsSync(USERS_DIR)) {
+      try {
+        const files = fs.readdirSync(USERS_DIR);
+        for (const file of files) {
+          if (file.endsWith('.enc.json')) {
+            const u = file.replace('.enc.json', '');
+            if (!candidates.includes(u)) candidates.push(u);
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  let decrypted = null;
+  let matchedUser = null;
+  let derivedKey = null;
+
+  for (const cand of candidates) {
+    const filePath = getUserFilePath(cand);
+    if (!fs.existsSync(filePath) && cand !== 'default') continue;
+    if (!fs.existsSync(filePath) && !fs.existsSync(DATA_FILE)) continue;
+
+    try {
+      const file = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : readFile('default');
+      const key = deriveKey(password || '', file.salt);
+      const raw = decryptData(file, key);
+      decrypted = normalizeVault(raw);
+      matchedUser = cand;
+      derivedKey = key;
+      break;
+    } catch (e) {
+      // wrong password for this candidate
+    }
+  }
+
+  if (decrypted && matchedUser && derivedKey) {
+    sessionKey = derivedKey;
     failedAttempts = 0;
     lockedUntil = 0;
 
-    // One-time migration: extract any base64 images → data/images/ files.
-    if (migrateBase64Images(vault)) {
-      writeFile(file.salt, encryptData(vault, key), vault.books.length);
+    // If specific bookId requested, switch active book
+    if (bookId && decrypted.books.some((b) => b.id === bookId)) {
+      decrypted.activeBookId = bookId;
     }
 
-    const token = encryptSessionToken(key);
-    setSessionCookie(res, token, req);
-    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
-  } catch (err) {
-    failedAttempts++;
-    if (failedAttempts >= 5) {
-      lockedUntil = Date.now() + 30 * 60 * 1000; // 30 minutes
-      failedAttempts = 0;
-      return res.status(429).json({
-        error: 'Too many failed attempts (5/5). Notebook is locked for 30 minutes.',
-        lockedOut: true,
-        remainingSeconds: 1800,
-      });
+    if (migrateBase64Images(decrypted)) {
+      const filePath = getUserFilePath(matchedUser);
+      const file = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      writeFile(file.salt, encryptData(decrypted, derivedKey), decrypted.books.length, matchedUser);
     }
-    const remainingAttempts = 5 - failedAttempts;
-    res.status(401).json({
-      error: 'Incorrect password.',
-      attemptsRemaining: remainingAttempts,
-      message: `Incorrect password. (${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining before 30-min lockout)`,
+
+    syncVaultToLibraryIndex(decrypted, matchedUser);
+
+    const token = encryptSessionToken(derivedKey, matchedUser);
+    setSessionCookie(res, token, req);
+    return res.json({
+      ok: true,
+      user: matchedUser,
+      vault: decrypted,
+      activeBookId: decrypted.activeBookId,
+      notebook: getActiveBook(decrypted),
     });
   }
-});
+
+  failedAttempts++;
+  if (failedAttempts >= 5) {
+    lockedUntil = Date.now() + 30 * 60 * 1000; // 30 minutes
+    failedAttempts = 0;
+    return res.status(429).json({
+      error: 'Too many failed attempts (5/5). Notebook is locked for 30 minutes.',
+      lockedOut: true,
+      remainingSeconds: 1800,
+    });
+  }
+  const remainingAttempts = 5 - failedAttempts;
+  return res.status(401).json({
+    error: 'Incorrect password.',
+    attemptsRemaining: remainingAttempts,
+    message: `Incorrect password. (${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining before 30-min lockout)`,
+  });
+}
+
+app.post('/api/unlock', handleLogin);
+app.post('/api/users/login', handleLogin);
+app.post('/api/auth/login', handleLogin);
 
 app.post('/api/lock', (req, res) => {
   sessionKey = null;
@@ -430,11 +683,22 @@ app.post('/api/lock', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/auth/logout', (req, res) => {
+  sessionKey = null;
+  res.set('Set-Cookie', `notebook_session=; Path=/; HttpOnly; Max-Age=0`);
+  res.json({ ok: true });
+});
+
+app.get('/api/users/me', requireUnlocked, (req, res) => {
+  res.json({ ok: true, user: req.currentUser || 'default' });
+});
+
 app.get('/api/notebook', requireUnlocked, (req, res) => {
   try {
-    const raw = decryptData(readFile(), req.sessionKey);
+    const user = req.currentUser || 'default';
+    const raw = decryptData(readFile(user), req.sessionKey);
     const vault = normalizeVault(raw);
-    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
+    res.json({ ok: true, user, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not read the notebook file.' });
   }
@@ -442,7 +706,9 @@ app.get('/api/notebook', requireUnlocked, (req, res) => {
 
 function handleSaveNotebook(req, res) {
   try {
-    const raw = decryptData(readFile(), req.sessionKey);
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
+    const raw = decryptData(file, req.sessionKey);
     let vault = normalizeVault(raw);
 
     if (req.body.vault) {
@@ -463,10 +729,10 @@ function handleSaveNotebook(req, res) {
       }
     }
 
-    const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length, user);
+    syncVaultToLibraryIndex(vault, user);
     const active = getActiveBook(vault);
-    res.json({ ok: true, updatedAt: active.updatedAt, vault, notebook: active });
+    res.json({ ok: true, updatedAt: active.updatedAt, user, vault, notebook: active });
   } catch (err) {
     res.status(500).json({ error: 'Could not save the notebook.' });
   }
@@ -479,16 +745,18 @@ app.post('/api/save', requireUnlocked, handleSaveNotebook);
 
 app.get('/api/books', requireUnlocked, (req, res) => {
   try {
-    const raw = decryptData(readFile(), req.sessionKey);
+    const user = req.currentUser || 'default';
+    const raw = decryptData(readFile(user), req.sessionKey);
     const vault = normalizeVault(raw);
     const summary = vault.books.map((b) => ({
       id: b.id,
       title: b.title,
       coverColor: b.coverColor || 'brown',
       pageCount: (b.pages || []).length,
+      owner: user,
       updatedAt: b.updatedAt,
     }));
-    res.json({ ok: true, activeBookId: vault.activeBookId, books: summary });
+    res.json({ ok: true, user, activeBookId: vault.activeBookId, books: summary });
   } catch (err) {
     res.status(500).json({ error: 'Could not fetch books list.' });
   }
@@ -496,8 +764,10 @@ app.get('/api/books', requireUnlocked, (req, res) => {
 
 app.post('/api/books/create', requireUnlocked, (req, res) => {
   try {
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
     const { title, coverColor } = req.body || {};
-    const raw = decryptData(readFile(), req.sessionKey);
+    const raw = decryptData(file, req.sessionKey);
     const vault = normalizeVault(raw);
 
     const newBook = {
@@ -514,9 +784,9 @@ app.post('/api/books/create', requireUnlocked, (req, res) => {
     vault.books.push(newBook);
     vault.activeBookId = newBook.id;
 
-    const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
-    res.json({ ok: true, vault, activeBookId: newBook.id, notebook: newBook });
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length, user);
+    syncVaultToLibraryIndex(vault, user);
+    res.json({ ok: true, user, vault, activeBookId: newBook.id, notebook: newBook });
   } catch (err) {
     res.status(500).json({ error: 'Could not create book.' });
   }
@@ -524,8 +794,10 @@ app.post('/api/books/create', requireUnlocked, (req, res) => {
 
 app.post('/api/books/switch', requireUnlocked, (req, res) => {
   try {
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
     const { bookId } = req.body || {};
-    const raw = decryptData(readFile(), req.sessionKey);
+    const raw = decryptData(file, req.sessionKey);
     const vault = normalizeVault(raw);
 
     if (!vault.books.some((b) => b.id === bookId)) {
@@ -533,9 +805,8 @@ app.post('/api/books/switch', requireUnlocked, (req, res) => {
     }
 
     vault.activeBookId = bookId;
-    const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
-    res.json({ ok: true, vault, activeBookId: bookId, notebook: getActiveBook(vault) });
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length, user);
+    res.json({ ok: true, user, vault, activeBookId: bookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not switch book.' });
   }
@@ -543,9 +814,11 @@ app.post('/api/books/switch', requireUnlocked, (req, res) => {
 
 function handleDeleteBook(req, res) {
   try {
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
     const bookId = (req.body && req.body.bookId) || req.params.id;
     if (!bookId) return res.status(400).json({ error: 'Missing bookId' });
-    const raw = decryptData(readFile(), req.sessionKey);
+    const raw = decryptData(file, req.sessionKey);
     const vault = normalizeVault(raw);
 
     if (vault.books.length <= 1) {
@@ -561,9 +834,9 @@ function handleDeleteBook(req, res) {
       vault.activeBookId = vault.books[0].id;
     }
 
-    const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
-    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length, user);
+    syncVaultToLibraryIndex(vault, user);
+    res.json({ ok: true, user, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not delete book.' });
   }
@@ -574,9 +847,11 @@ app.delete('/api/books/:id', requireUnlocked, handleDeleteBook);
 
 function handleRenameBook(req, res) {
   try {
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
     const bookId = (req.body && req.body.bookId) || req.params.id;
     const { title, coverColor } = req.body || {};
-    const raw = decryptData(readFile(), req.sessionKey);
+    const raw = decryptData(file, req.sessionKey);
     const vault = normalizeVault(raw);
 
     const target = vault.books.find((b) => b.id === bookId);
@@ -586,9 +861,9 @@ function handleRenameBook(req, res) {
     if (coverColor !== undefined) target.coverColor = coverColor;
     target.updatedAt = new Date().toISOString();
 
-    const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
-    res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length, user);
+    syncVaultToLibraryIndex(vault, user);
+    res.json({ ok: true, user, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not update book.' });
   }
@@ -603,15 +878,19 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
     if (!newPassword || newPassword.length < 4) {
       return res.status(400).json({ error: 'Choose a password with at least 4 characters.' });
     }
-    const vault = normalizeVault(decryptData(readFile(), req.sessionKey));
+    const user = req.currentUser || 'default';
+    const file = readFile(user);
+    const vault = normalizeVault(decryptData(file, req.sessionKey));
     const newSalt = crypto.randomBytes(16).toString('hex');
     const newKey = deriveKey(newPassword, newSalt);
-    writeFile(newSalt, encryptData(vault, newKey), vault.books.length);
+    writeFile(newSalt, encryptData(vault, newKey), vault.books.length, user);
     sessionKey = newKey;
     failedAttempts = 0;
     lockedUntil = 0;
 
-    const token = encryptSessionToken(newKey);
+    syncVaultToLibraryIndex(vault, user);
+
+    const token = encryptSessionToken(newKey, user);
     setSessionCookie(res, token, req);
     res.json({ ok: true });
   } catch (err) {
