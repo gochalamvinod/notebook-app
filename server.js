@@ -110,17 +110,17 @@ function decryptSessionToken(token) {
   }
 }
 
-function setSessionCookie(res, token) {
+function setSessionCookie(res, token, req) {
   const cookieVal = encodeURIComponent(token);
-  const flags = isVercel
+  const isHttps = isVercel || (req && (req.secure || (req.headers && req.headers['x-forwarded-proto'] === 'https')));
+  const flags = isHttps
     ? 'Path=/; HttpOnly; SameSite=None; Secure; Max-Age=2592000'
     : 'Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000';
   res.set('Set-Cookie', `notebook_session=${cookieVal}; ${flags}`);
 }
 
 function getSessionKey(req) {
-  if (sessionKey) return sessionKey;
-  const cookieHeader = req.headers.cookie || '';
+  const cookieHeader = (req && req.headers && req.headers.cookie) || '';
   const match = cookieHeader.match(/(?:^|; )notebook_session=([^;]*)/);
   if (match) {
     const key = decryptSessionToken(decodeURIComponent(match[1]));
@@ -245,7 +245,7 @@ app.post('/api/setup', (req, res) => {
   sessionKey = key;
 
   const token = encryptSessionToken(key);
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, req);
   res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
 });
 
@@ -267,7 +267,7 @@ app.post('/api/unlock', (req, res) => {
     }
 
     const token = encryptSessionToken(key);
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, req);
     res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(401).json({ error: 'Incorrect password.' });
@@ -440,7 +440,7 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
     sessionKey = newKey;
 
     const token = encryptSessionToken(newKey);
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Could not change the password.' });
@@ -790,7 +790,7 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
   }, (proxyRes) => {
     const status = proxyRes.statusCode || 0;
 
-    // Follow redirects
+    // Follow redirects up to 8 hops
     if ([301, 302, 303, 307, 308].includes(status) && proxyRes.headers.location && redirectsLeft > 0) {
       proxyRes.resume();
       try {
@@ -811,15 +811,36 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
       expressRes.set('Set-Cookie', 'last_proxy_origin=' + encodeURIComponent(target.origin) + '; Path=/; SameSite=Lax');
     } catch(e){}
 
+    // Handle client disconnect / socket close to prevent resource leaks
+    expressRes.on('close', () => {
+      if (!proxyRes.complete) {
+        try { proxyReq.destroy(); } catch (e) {}
+      }
+    });
+
+    proxyRes.on('error', (err) => {
+      if (!expressRes.headersSent) expressRes.status(502).json({ error: err.message });
+      else expressRes.end();
+    });
+
     if (isHtml) {
       // Decompress the incoming HTML stream if compressed
       let inputStream = proxyRes;
+      let decompressor = null;
       if (encoding === 'gzip') {
-        inputStream = proxyRes.pipe(zlib.createGunzip());
+        decompressor = zlib.createGunzip();
       } else if (encoding === 'br') {
-        inputStream = proxyRes.pipe(zlib.createBrotliDecompress());
+        decompressor = zlib.createBrotliDecompress();
       } else if (encoding === 'deflate') {
-        inputStream = proxyRes.pipe(zlib.createInflate());
+        decompressor = zlib.createInflate();
+      }
+
+      if (decompressor) {
+        decompressor.on('error', () => {
+          if (!expressRes.headersSent) expressRes.status(502).json({ error: 'Decompression failed' });
+          else expressRes.end();
+        });
+        inputStream = proxyRes.pipe(decompressor);
       }
 
       const baseHref = target.origin + target.pathname.replace(/[^/]*$/, '');
@@ -830,9 +851,11 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
       inputStream.on('data', (chunk) => {
         let out = chunk;
 
-        if (!injected) {
-          out = out.replace(/<base[^>]*>/gi, '');
+        // Strip existing base and frame-blocking meta tags from incoming chunks first
+        out = out.replace(/<base[^>]*>/gi, '');
+        out = out.replace(/<meta[^>]*http-equiv\s*=\s*["']?(?:X-Frame-Options|Content-Security-Policy|Content-Security-Policy-Report-Only)["']?[^>]*>/gi, '');
 
+        if (!injected) {
           if (/<head[^>]*>/i.test(out)) {
             out = out.replace(/<head[^>]*>/i, '$&' + injection);
             injected = true;
@@ -848,9 +871,6 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
           }
         }
 
-        out = out.replace(/<base[^>]*>/gi, '');
-        out = out.replace(/<meta[^>]*http-equiv\s*=\s*["']?X-Frame-Options["']?[^>]*>/gi, '');
-
         expressRes.write(out);
       });
 
@@ -859,7 +879,10 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
         expressRes.end();
       });
 
-      inputStream.on('error', () => expressRes.end());
+      inputStream.on('error', () => {
+        if (!expressRes.headersSent) expressRes.status(502).end();
+        else expressRes.end();
+      });
     } else {
       // Non-HTML: pipe directly preserving encoding
       proxyRes.pipe(expressRes);
@@ -1040,7 +1063,7 @@ app.use((req, res, next) => {
   next();
 });
 
-if (!process.env.VERCEL) {
+if (require.main === module) {
   app.listen(PORT, () => {
     console.log('');
     console.log('  📖  Leatherbound Notebook is running.');

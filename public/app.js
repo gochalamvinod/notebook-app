@@ -1068,13 +1068,15 @@
     dismissOverlay();
   });
 
-  // ---------- live-embed resizer ----------
+  // ---------- live-embed resizer & controls ----------
   // The ::after pseudo-element at the bottom of .nb-live-embed__frame-wrap
   // acts as a visual drag handle. We wire up a mousedown on the frame-wrap
-  // itself (near the bottom) to drag-resize the iframe height.
+  // itself (near the bottom) to drag-resize the iframe/video height.
 
   function wireEmbedResizers(pageEl) {
     if (!pageEl) return;
+
+    // 1. Drag-to-resize height handle
     pageEl.querySelectorAll('.nb-live-embed__frame-wrap').forEach((wrap) => {
       if (wrap.dataset.resizeWired) return;
       wrap.dataset.resizeWired = '1';
@@ -1088,6 +1090,10 @@
         e.stopPropagation();
         const startY = e.clientY;
         const startH = wrap.offsetHeight;
+        const iframe = wrap.querySelector('iframe');
+
+        // Prevent iframe from swallowing mousemove events during drag
+        if (iframe) iframe.style.pointerEvents = 'none';
 
         function onMove(ev) {
           const newH = Math.max(120, startH + ev.clientY - startY);
@@ -1096,6 +1102,7 @@
         function onUp() {
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
+          if (iframe) iframe.style.pointerEvents = '';
           syncSpreadFromDOM();
           scheduleSave();
         }
@@ -1104,12 +1111,13 @@
       });
     });
 
-    // Wire up remove buttons (for embeds inserted via inline onclick, this
-    // ensures save fires after removal).
-    pageEl.querySelectorAll('.nb-live-embed__remove').forEach((btn) => {
+    // 2. Remove buttons
+    pageEl.querySelectorAll('.nb-live-embed__btn--remove').forEach((btn) => {
       if (btn.dataset.removeWired) return;
       btn.dataset.removeWired = '1';
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const embed = btn.closest('.nb-live-embed');
         if (embed) embed.remove();
         syncSpreadFromDOM();
@@ -1117,7 +1125,7 @@
       });
     });
 
-    // Wire up reload buttons to refresh the embedded iframe cleanly
+    // 3. Reload buttons to refresh the embedded iframe or video with cache-buster
     pageEl.querySelectorAll('.nb-live-embed__btn--reload').forEach((btn) => {
       if (btn.dataset.reloadWired) return;
       btn.dataset.reloadWired = '1';
@@ -1127,14 +1135,19 @@
         const embed = btn.closest('.nb-live-embed');
         if (!embed) return;
         const iframe = embed.querySelector('.nb-live-embed__iframe');
+        const video = embed.querySelector('.nb-live-embed__video');
         const url = embed.dataset.url;
         if (iframe && url) {
-          iframe.src = '/api/proxy?url=' + encodeURIComponent(url) + '&_t=' + Date.now();
+          const src = getIframeSrcForUrl(url);
+          iframe.src = src + (src.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        } else if (video && url) {
+          video.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+          video.load();
         }
       });
     });
 
-    // Wire up expand/fullscreen toggle buttons
+    // 4. Expand / fullscreen toggle buttons
     pageEl.querySelectorAll('.nb-live-embed__btn--expand').forEach((btn) => {
       if (btn.dataset.expandWired) return;
       btn.dataset.expandWired = '1';
@@ -1147,27 +1160,82 @@
       });
     });
 
-    // Ensure any previously saved embed whose iframe had a broken src gets restored
+    // 5. Ensure any previously saved embed whose iframe had a broken src gets restored
     pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
       const iframe = embed.querySelector('.nb-live-embed__iframe');
       const url = embed.dataset.url;
-      if (iframe && url && (!iframe.getAttribute('src') || iframe.getAttribute('src').startsWith('/search'))) {
-        iframe.src = '/api/proxy?url=' + encodeURIComponent(url);
+      if (iframe && url) {
+        const curSrc = iframe.getAttribute('src') || '';
+        if (!curSrc || curSrc.startsWith('/search') || curSrc.includes('undefined')) {
+          iframe.src = getIframeSrcForUrl(url);
+        }
       }
     });
   }
 
+  // Global Escape key listener to close expanded fullscreen embeds
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.nb-live-embed--expanded').forEach((el) => {
+        el.classList.remove('nb-live-embed--expanded');
+      });
+    }
+  });
+
   // ---------- live URLs: linkify, embed, preview ----------
   const BARE_URL_RE = /^https?:\/\/\S+$/i;
   const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|avif)(\?[^\s]*)?(#.*)?$/i;
+  const VIDEO_EXT_RE = /\.(mp4|webm|ogg|ogv|mov|m4v)(\?[^\s]*)?(#.*)?$/i;
+
+  function parseYouTubeId(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^www\./i, '').replace(/^m\./i, '');
+      if (host === 'youtu.be') {
+        const id = u.pathname.slice(1).split('/')[0].split('?')[0];
+        if (id && /^[\w-]{6,}$/.test(id)) return id;
+      }
+      if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+        if (u.pathname === '/watch') {
+          const v = u.searchParams.get('v');
+          if (v && /^[\w-]{6,}$/.test(v)) return v;
+        }
+        const m = u.pathname.match(/^\/(?:shorts|embed|v)\/([\w-]{6,})/i);
+        if (m) return m[1];
+      }
+    } catch (e) {}
+    const m = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|v\/)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([\w-]{6,})/i);
+    return m ? m[1] : null;
+  }
+
+  function parseVimeoId(url) {
+    if (!url || typeof url !== 'string') return null;
+    const m = url.match(/(?:vimeo\.com\/(?:video\/|channels\/(?:\w+\/)?|groups\/[^\/]+\/videos\/)?|player\.vimeo\.com\/video\/)(\d+)/i);
+    return m ? m[1] : null;
+  }
 
   function classifyUrl(url) {
     if (IMAGE_EXT_RE.test(url)) return { type: 'image' };
-    let m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{6,})/i);
-    if (m) return { type: 'youtube', id: m[1] };
-    m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
-    if (m) return { type: 'vimeo', id: m[1] }; 
+    if (VIDEO_EXT_RE.test(url)) return { type: 'video' };
+    const ytId = parseYouTubeId(url);
+    if (ytId) return { type: 'youtube', id: ytId };
+    const vimeoId = parseVimeoId(url);
+    if (vimeoId) return { type: 'vimeo', id: vimeoId };
     return { type: 'link' };
+  }
+
+  function getIframeSrcForUrl(url) {
+    if (!url) return '/api/proxy?url=about:blank';
+    const ytId = parseYouTubeId(url);
+    if (ytId) {
+      return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
+    }
+    const vimeoId = parseVimeoId(url);
+    if (vimeoId) {
+      return `https://player.vimeo.com/video/${vimeoId}`;
+    }
+    return '/api/proxy?url=' + encodeURIComponent(url);
   }
 
   function escapeHtml(s) {
@@ -1184,11 +1252,15 @@
     if (kind.type === 'image') {
       return `<img src="${safeUrl}" alt="">`;
     }
+    if (kind.type === 'video') {
+      const fileName = url.split('/').pop().split('?')[0] || 'Video';
+      return buildDirectVideoEmbedHTML(url, fileName);
+    }
     if (kind.type === 'youtube') {
-      return `<div class="nb-embed" contenteditable="false"><iframe src="https://www.youtube.com/embed/${kind.id}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe></div><br>`;
+      return buildLiveEmbedHTML(url, 'YouTube Video', 'youtube.com', '🎥');
     }
     if (kind.type === 'vimeo') {
-      return `<div class="nb-embed" contenteditable="false"><iframe src="https://player.vimeo.com/video/${kind.id}" title="Vimeo video" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div><br>`;
+      return buildLiveEmbedHTML(url, 'Vimeo Video', 'vimeo.com', '🎥');
     }
 
     // Generic link — embed a LIVE iframe of the actual website, with a
@@ -1210,23 +1282,23 @@
       }
     } catch (err) { /* ignore */ }
 
-    return buildLiveEmbedHTML(url, title, domain);
+    return buildLiveEmbedHTML(url, title, domain, '🌐');
   }
 
   /**
-   * Render a live-website embed: a header bar (title + domain + reload + expand + open/remove
-   * buttons) on top, and a full iframe of the real website below it.
+   * Render a live-website or video embed: a header bar (title + domain + reload + expand + open/remove
+   * buttons) on top, and a full iframe of the real website/video player below it.
    */
-  function buildLiveEmbedHTML(url, title, domain) {
+  function buildLiveEmbedHTML(url, title, domain, icon = '🌐') {
     const safeUrl = escapeAttr(url);
     const safeTitle = escapeHtml((title || url).slice(0, 120));
     const safeDomain = escapeHtml(domain || '');
-    const proxyUrl = '/api/proxy?url=' + encodeURIComponent(url);
+    const iframeSrc = getIframeSrcForUrl(url);
 
     return (
       `<div class="nb-live-embed" contenteditable="false" data-url="${safeUrl}">` +
         `<div class="nb-live-embed__bar">` +
-          `<span class="nb-live-embed__icon">🌐</span>` +
+          `<span class="nb-live-embed__icon">${icon}</span>` +
           `<span class="nb-live-embed__info">` +
             `<span class="nb-live-embed__title">${safeTitle}</span>` +
             `<span class="nb-live-embed__domain">${safeDomain}</span>` +
@@ -1240,12 +1312,44 @@
           `<a class="nb-live-embed__btn nb-live-embed__btn--open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">` +
             `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` +
           `</a>` +
-          `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed" onclick="this.closest('.nb-live-embed').remove()">` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed">` +
             `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
           `</button>` +
         `</div>` +
         `<div class="nb-live-embed__frame-wrap">` +
-          `<iframe class="nb-live-embed__iframe" src="${escapeAttr(proxyUrl)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
+          `<iframe class="nb-live-embed__iframe" src="${escapeAttr(iframeSrc)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
+        `</div>` +
+      `</div><br>`
+    );
+  }
+
+  function buildDirectVideoEmbedHTML(url, title) {
+    const safeUrl = escapeAttr(url);
+    const safeTitle = escapeHtml((title || 'Video').slice(0, 120));
+
+    return (
+      `<div class="nb-live-embed nb-live-embed--video" contenteditable="false" data-url="${safeUrl}">` +
+        `<div class="nb-live-embed__bar">` +
+          `<span class="nb-live-embed__icon">🎬</span>` +
+          `<span class="nb-live-embed__info">` +
+            `<span class="nb-live-embed__title">${safeTitle}</span>` +
+            `<span class="nb-live-embed__domain">HTML5 Video</span>` +
+          `</span>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--reload" title="Reload video">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>` +
+          `</button>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--expand" title="Expand / Fullscreen">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>` +
+          `</button>` +
+          `<a class="nb-live-embed__btn nb-live-embed__btn--open" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="Open in new tab">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>` +
+          `</a>` +
+          `<button class="nb-live-embed__btn nb-live-embed__btn--remove" title="Remove embed">` +
+            `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>` +
+          `</button>` +
+        `</div>` +
+        `<div class="nb-live-embed__frame-wrap">` +
+          `<video class="nb-live-embed__video" src="${safeUrl}" controls preload="metadata" playsinline></video>` +
         `</div>` +
       `</div><br>`
     );

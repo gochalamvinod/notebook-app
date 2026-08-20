@@ -4,7 +4,8 @@
   "description": "A private, encrypted, 3D page-flipping notebook you run on your own machine.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run_all.js"
   },
   "license": "MIT",
   "dependencies": {
