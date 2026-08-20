@@ -1007,14 +1007,14 @@ const CURATED_YOUTUBE_FALLBACKS = {
     { id: 'kffacxfA7G4', title: 'Technical Analysis Full Course', channel: 'Financial Education', duration: '1:12:30', thumbnail: 'https://i.ytimg.com/vi/kffacxfA7G4/hqdefault.jpg' }
   ],
   lofi: [
-    { id: 'jfKfPfyJRdk', title: 'Lofi Hip Hop Radio - Beats to Relax/Study to', channel: 'Lofi Girl', duration: 'LIVE', thumbnail: 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg' },
-    { id: '5qap5aO4i9A', title: 'Lofi Beats to Chill / Sleep to', channel: 'ChillHop Music', duration: 'LIVE', thumbnail: 'https://i.ytimg.com/vi/5qap5aO4i9A/hqdefault.jpg' }
+    { id: '5qap5aO4i9A', title: 'Lofi Beats to Chill / Study to', channel: 'ChillHop Music', duration: '1:02:40', thumbnail: 'https://i.ytimg.com/vi/5qap5aO4i9A/hqdefault.jpg' },
+    { id: 'kffacxfA7G4', title: 'Relaxing Instrumental Beats', channel: 'Lofi World', duration: '45:10', thumbnail: 'https://i.ytimg.com/vi/kffacxfA7G4/hqdefault.jpg' }
   ],
   piano: [
     { id: 'WPni755-Krg', title: 'Beautiful Relaxing Piano Music for Studying & Sleeping', channel: 'Soothing Relaxation', duration: '3:02:15', thumbnail: 'https://i.ytimg.com/vi/WPni755-Krg/hqdefault.jpg' }
   ],
   nasa: [
-    { id: '21X5lGlDOfg', title: 'NASA Live: Earth from Space (ISS Live Stream)', channel: 'NASA', duration: 'LIVE', thumbnail: 'https://i.ytimg.com/vi/21X5lGlDOfg/hqdefault.jpg' }
+    { id: 'C0DPdy98e4c', title: 'Earth from Space: 4K Relaxation Video', channel: 'NASA Space', duration: '1:00:00', thumbnail: 'https://i.ytimg.com/vi/C0DPdy98e4c/hqdefault.jpg' }
   ]
 };
 
@@ -1278,7 +1278,7 @@ app.get('/api/portal/youtube', (req, res) => {
     <span class="chip" data-query="NASA space live stream">🚀 NASA Space</span>
   </div>
   <div class="player-wrapper">
-    <iframe id="mainPlayer" class="player-frame" src="https://www.youtube.com/embed/jfKfPfyJRdk?rel=0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe>
+    <iframe id="mainPlayer" class="player-frame" src="https://www.youtube.com/embed/3jz1vY7X4Q8?rel=0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe>
   </div>
   <div class="results-section" id="resultsSection">
     <div class="results-title" id="resultsHeading">Recommended Videos</div>
@@ -1365,7 +1365,7 @@ app.get('/api/portal/youtube', (req, res) => {
 
   homeLogo.addEventListener('click', () => {
     input.value = '';
-    searchVideos('Lofi hip hop beats');
+    searchVideos('ICT trading');
   });
 
   document.querySelectorAll('.chip').forEach(c => {
@@ -1380,6 +1380,9 @@ app.get('/api/portal/youtube', (req, res) => {
       }
     });
   });
+
+  // Auto-populate on load
+  searchVideos('ICT trading');
 </script>
 </body>
 </html>`;
