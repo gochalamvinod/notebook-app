@@ -1313,9 +1313,7 @@
     if (VIDEO_EXT_RE.test(url)) return { type: 'video' };
     const ytId = parseYouTubeId(url);
     if (ytId) return { type: 'youtube', id: ytId };
-    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test((url || '').trim())) {
-      return { type: 'youtube', id: 'trending' };
-    }
+    // Root youtube.com with no video ID — treat as a regular link (proxy it)
     const vimeoId = parseVimeoId(url);
     if (vimeoId) return { type: 'vimeo', id: vimeoId };
     return { type: 'link' };
@@ -1327,9 +1325,6 @@
     const ytId = parseYouTubeId(trimmed);
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
-    }
-    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
-      return `https://www.youtube-nocookie.com/embed?listType=search&list=trending`;
     }
     // Google search and root: route through iframe-friendly search
     if (/^(?:https?:\/\/)?(?:www\.)?google\.com\/?$/i.test(trimmed)) {
@@ -1343,6 +1338,7 @@
     if (vimeoId) {
       return `https://player.vimeo.com/video/${vimeoId}`;
     }
+    // Everything else (including root youtube.com) goes through the proxy
     return '/api/proxy?url=' + encodeURIComponent(trimmed);
   }
 
@@ -1531,6 +1527,7 @@
     activePageEl = el;
     const html = await buildUrlInsertHTML(trimmed);
     document.execCommand('insertHTML', false, html);
+    wireEmbedResizers(el);
     syncSpreadFromDOM();
     scheduleSave();
   }
@@ -1606,6 +1603,7 @@
     } else {
       const html = await buildUrlInsertHTML(trimmed);
       document.execCommand('insertHTML', false, html);
+      wireEmbedResizers(activePageEl);
     }
     syncSpreadFromDOM();
     scheduleSave();
@@ -1651,6 +1649,7 @@
       restoreSelection();
       const html = await buildUrlInsertHTML(url);
       document.execCommand('insertHTML', false, html);
+      wireEmbedResizers(activePageEl);
       syncSpreadFromDOM();
       scheduleSave();
     });
@@ -1669,6 +1668,7 @@
         restoreSelection();
         const html = await buildUrlInsertHTML(query);
         document.execCommand('insertHTML', false, html);
+        wireEmbedResizers(activePageEl);
         syncSpreadFromDOM();
         scheduleSave();
         return;
@@ -1707,6 +1707,7 @@
               restoreSelection();
               const html = await buildUrlInsertHTML(url);
               document.execCommand('insertHTML', false, html);
+              wireEmbedResizers(activePageEl);
               syncSpreadFromDOM();
               scheduleSave();
             });
@@ -1720,6 +1721,7 @@
               restoreSelection();
               const html = await buildPreviewCardHTML(url);
               document.execCommand('insertHTML', false, html);
+              wireEmbedResizers(activePageEl);
               syncSpreadFromDOM();
               scheduleSave();
             });
@@ -1742,6 +1744,7 @@
               restoreSelection();
               const html = await buildUrlInsertHTML(searchUrl);
               document.execCommand('insertHTML', false, html);
+              wireEmbedResizers(activePageEl);
               syncSpreadFromDOM();
               scheduleSave();
             });
