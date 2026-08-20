@@ -996,6 +996,76 @@ function streamProxy(urlStr, redirectsLeft, expressRes) {
   });
 }
 
+// ---------- YouTube search scraper API ----------
+app.get('/api/youtube-search', (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!query) return res.json({ ok: true, results: [] });
+
+  const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+  https.get(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+    timeout: 8000,
+  }, (ytRes) => {
+    let html = '';
+    ytRes.on('data', (c) => { html += c; });
+    ytRes.on('end', () => {
+      const results = [];
+      try {
+        const dataMatch = html.match(/var ytInitialData = ({.+?});<\/script>/s) || html.match(/window\["ytInitialData"\] = ({.+?});<\/script>/s);
+        if (dataMatch) {
+          const data = JSON.parse(dataMatch[1]);
+          const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+          if (Array.isArray(contents)) {
+            for (const section of contents) {
+              const itemSection = section?.itemSectionRenderer?.contents;
+              if (Array.isArray(itemSection)) {
+                for (const item of itemSection) {
+                  const vr = item.videoRenderer;
+                  if (vr && vr.videoId) {
+                    results.push({
+                      id: vr.videoId,
+                      title: vr.title?.runs?.[0]?.text || vr.title?.simpleText || 'YouTube Video',
+                      channel: vr.ownerText?.runs?.[0]?.text || '',
+                      duration: vr.lengthText?.simpleText || '',
+                      thumbnail: vr.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      if (results.length === 0) {
+        const idMatches = [...html.matchAll(/"videoId":"([a-zA-Z0-9_-]{11})"/g)];
+        const seen = new Set();
+        for (const m of idMatches) {
+          const id = m[1];
+          if (!seen.has(id)) {
+            seen.add(id);
+            results.push({
+              id,
+              title: `Video (${id})`,
+              channel: 'YouTube',
+              duration: '',
+              thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+            });
+            if (results.length >= 10) break;
+          }
+        }
+      }
+
+      res.json({ ok: true, results: results.slice(0, 12) });
+    });
+  }).on('error', () => {
+    res.json({ ok: true, results: [] });
+  });
+});
+
 // Built-in interactive YouTube & Web Search Portals
 app.get('/api/portal/youtube', (req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');
@@ -1011,8 +1081,8 @@ app.get('/api/portal/youtube', (req, res) => {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: Georgia, 'Times New Roman', serif;
-    background: #181818;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #0f0f0f;
     color: #f1f1f1;
     display: flex;
     flex-direction: column;
@@ -1020,21 +1090,22 @@ app.get('/api/portal/youtube', (req, res) => {
     overflow: hidden;
   }
   .header {
-    background: #202020;
-    border-bottom: 1px solid #333;
+    background: #212121;
+    border-bottom: 1px solid #383838;
     padding: 8px 12px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    flex-shrink: 0;
   }
-  .logo { font-weight: bold; color: #ff0000; font-size: 1.1rem; display: flex; align-items: center; gap: 4px; }
+  .logo { font-weight: bold; color: #ff0000; font-size: 1.1rem; display: flex; align-items: center; gap: 5px; cursor: pointer; }
   .search-box {
     flex: 1;
     display: flex;
     background: #121212;
-    border: 1px solid #444;
+    border: 1px solid #303030;
     border-radius: 20px;
-    padding: 2px 10px;
+    padding: 3px 12px;
   }
   .search-box input {
     flex: 1;
@@ -1051,6 +1122,7 @@ app.get('/api/portal/youtube', (req, res) => {
     color: #aaa;
     cursor: pointer;
     padding: 0 4px;
+    font-size: 0.9rem;
   }
   .search-box button:hover { color: #fff; }
   .content {
@@ -1058,81 +1130,218 @@ app.get('/api/portal/youtube', (req, res) => {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    padding: 16px;
-    gap: 12px;
+    padding: 12px;
+    gap: 10px;
   }
   .chips {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
+    flex-shrink: 0;
   }
   .chip {
-    background: #2a2a2a;
-    border: 1px solid #444;
-    border-radius: 16px;
-    color: #ddd;
-    font-size: 0.78rem;
+    background: #272727;
+    border: 1px solid #3f3f3f;
+    border-radius: 14px;
+    color: #f1f1f1;
+    font-size: 0.75rem;
     padding: 4px 10px;
     cursor: pointer;
     transition: all 0.15s;
+    user-select: none;
   }
   .chip:hover { background: #ff0000; color: #fff; border-color: #ff0000; }
-  .player-frame {
-    flex: 1;
+  .player-wrapper {
     width: 100%;
-    min-height: 240px;
-    border: none;
-    border-radius: 8px;
+    aspect-ratio: 16 / 9;
+    min-height: 200px;
+    max-height: 360px;
     background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+  .player-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+  .results-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+  .results-title {
+    font-size: 0.82rem;
+    color: #aaa;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .video-card {
+    display: flex;
+    gap: 10px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    align-items: center;
+  }
+  .video-card:hover { background: #2a2a2a; border-color: #555; }
+  .video-card.active { border-color: #ff0000; background: #2d1818; }
+  .video-thumb {
+    width: 90px;
+    height: 54px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: #111;
+    flex-shrink: 0;
+  }
+  .video-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .video-name {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .video-meta {
+    font-size: 0.72rem;
+    color: #aaa;
   }
 </style>
 </head>
 <body>
 <div class="header">
-  <div class="logo">▶ YouTube</div>
+  <div class="logo" id="homeLogo">▶ YouTube</div>
   <form class="search-box" id="ytForm">
-    <input type="text" id="ytInput" placeholder="Paste YouTube link or enter video ID (e.g. dQw4w9WgXcQ)..." />
+    <input type="text" id="ytInput" placeholder="Search videos or paste YouTube link..." />
     <button type="submit">🔍</button>
   </form>
 </div>
 <div class="content">
   <div class="chips">
-    <span class="chip" data-id="jfKfPfyJRdk">🎵 Lofi Hip Hop</span>
-    <span class="chip" data-id="5qap5aO4i9A">☕ Chill Lofi Beats</span>
+    <span class="chip" data-query="ICT trading strategy">📈 ICT Trading</span>
+    <span class="chip" data-query="Lofi hip hop radio beats to relax">🎵 Lofi Hip Hop</span>
+    <span class="chip" data-query="Chill lofi beats">☕ Chill Beats</span>
     <span class="chip" data-id="dQw4w9WgXcQ">🕺 Rick Astley</span>
-    <span class="chip" data-id="WPni755-Krg">🎹 Relaxing Piano</span>
-    <span class="chip" data-id="21X5lGlDOfg">🚀 NASA Space Live</span>
+    <span class="chip" data-query="Relaxing piano music study">🎹 Piano</span>
+    <span class="chip" data-query="NASA space live stream">🚀 NASA Space</span>
   </div>
-  <iframe id="mainPlayer" class="player-frame" src="https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=0&rel=0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+  <div class="player-wrapper">
+    <iframe id="mainPlayer" class="player-frame" src="https://www.youtube-nocookie.com/embed/jfKfPfyJRdk?autoplay=0&rel=0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+  </div>
+  <div class="results-section" id="resultsSection">
+    <div class="results-title" id="resultsHeading">Recommended Videos</div>
+    <div class="results-list" id="resultsList"></div>
+  </div>
 </div>
 <script>
   const form = document.getElementById('ytForm');
   const input = document.getElementById('ytInput');
   const player = document.getElementById('mainPlayer');
+  const resultsList = document.getElementById('resultsList');
+  const resultsHeading = document.getElementById('resultsHeading');
+  const homeLogo = document.getElementById('homeLogo');
 
   function extractId(val) {
     if (!val) return null;
     const m = val.match(/(?:youtube\\.com\\/(?:watch\\?(?:.*&)?v=|shorts\\/|embed\\/|v\\/)|youtu\\.be\\/|youtube-nocookie\\.com\\/embed\\/)([\\w-]{6,})/i);
     if (m) return m[1];
-    if (/^[\\w-]{6,12}$/.test(val.trim())) return val.trim();
+    if (/^[\\w-]{11}$/.test(val.trim())) return val.trim();
     return null;
+  }
+
+  function playVideo(id, title) {
+    if (!id) return;
+    player.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+    document.querySelectorAll('.video-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.id === id);
+    });
+  }
+
+  async function searchVideos(query) {
+    if (!query) return;
+    const directId = extractId(query);
+    if (directId) {
+      playVideo(directId);
+      resultsHeading.textContent = 'Playing Direct Video';
+      resultsList.innerHTML = '<div style="color: #aaa; font-size: 0.8rem; padding: 6px;">Playing video ID: ' + directId + '</div>';
+      return;
+    }
+
+    resultsHeading.textContent = 'Searching for "' + query + '"...';
+    resultsList.innerHTML = '<div style="color: #888; font-size: 0.8rem; padding: 8px;">Loading YouTube search results...</div>';
+
+    try {
+      const res = await fetch('/api/youtube-search?q=' + encodeURIComponent(query));
+      const data = await res.json();
+      if (data && data.ok && Array.isArray(data.results) && data.results.length > 0) {
+        resultsHeading.textContent = 'Results for "' + query + '" (' + data.results.length + ')';
+        resultsList.innerHTML = '';
+        
+        // Auto-play the first video
+        playVideo(data.results[0].id);
+
+        data.results.forEach((item, idx) => {
+          const card = document.createElement('div');
+          card.className = 'video-card' + (idx === 0 ? ' active' : '');
+          card.dataset.id = item.id;
+          card.innerHTML = 
+            '<img class="video-thumb" src="' + (item.thumbnail || 'https://i.ytimg.com/vi/' + item.id + '/hqdefault.jpg') + '" alt="" />' +
+            '<div class="video-info">' +
+              '<div class="video-name">' + (item.title || 'Video') + '</div>' +
+              '<div class="video-meta">' + (item.channel ? item.channel + ' · ' : '') + (item.duration || 'Watch Video') + '</div>' +
+            '</div>';
+          card.addEventListener('click', () => {
+            playVideo(item.id);
+          });
+          resultsList.appendChild(card);
+        });
+      } else {
+        resultsHeading.textContent = 'No Direct Video Results';
+        resultsList.innerHTML = '<div style="color: #888; font-size: 0.8rem; padding: 8px;">No videos found. Try a different search term or paste a direct YouTube video URL.</div>';
+      }
+    } catch(e) {
+      resultsHeading.textContent = 'Search Error';
+      resultsList.innerHTML = '<div style="color: #c9302c; font-size: 0.8rem; padding: 8px;">Could not search YouTube. Please check network.</div>';
+    }
   }
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const id = extractId(input.value);
-    if (id) {
-      player.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
-    } else {
-      player.src = 'https://www.youtube-nocookie.com/embed?listType=search&list=' + encodeURIComponent(input.value.trim());
-    }
+    const val = input.value.trim();
+    if (val) searchVideos(val);
+  });
+
+  homeLogo.addEventListener('click', () => {
+    input.value = '';
+    searchVideos('Lofi hip hop beats');
   });
 
   document.querySelectorAll('.chip').forEach(c => {
     c.addEventListener('click', () => {
       const id = c.dataset.id;
+      const query = c.dataset.query;
       if (id) {
-        player.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0';
+        playVideo(id);
+      } else if (query) {
+        input.value = query;
+        searchVideos(query);
       }
     });
   });
