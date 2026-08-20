@@ -1220,6 +1220,9 @@
     if (VIDEO_EXT_RE.test(url)) return { type: 'video' };
     const ytId = parseYouTubeId(url);
     if (ytId) return { type: 'youtube', id: ytId };
+    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test((url || '').trim())) {
+      return { type: 'youtube', id: 'trending' };
+    }
     const vimeoId = parseVimeoId(url);
     if (vimeoId) return { type: 'vimeo', id: vimeoId };
     return { type: 'link' };
@@ -1230,6 +1233,9 @@
     const ytId = parseYouTubeId(url);
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
+    }
+    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test((url || '').trim())) {
+      return `https://www.youtube-nocookie.com/embed?listType=search&list=trending`;
     }
     const vimeoId = parseVimeoId(url);
     if (vimeoId) {

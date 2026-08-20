@@ -732,8 +732,9 @@ function buildInjection(baseHref, targetOrigin) {
     `<script>` +
     `(function(){` +
     `var _origOrigin=${JSON.stringify(targetOrigin)};` +
-    `var _proxyApi='/api/proxy-api?url=';` +
-    `var _proxyPage='/api/proxy?url=';` +
+    `var _hostOrigin=window.location.protocol+'//'+window.location.host;` +
+    `var _proxyApi=_hostOrigin+'/api/proxy-api?url=';` +
+    `var _proxyPage=_hostOrigin+'/api/proxy?url=';` +
     // 1. Always report online to prevent SPA offline-detection screens
     `try{Object.defineProperty(navigator,'onLine',{get:function(){return true},configurable:false})}catch(e){}` +
     // 3. Neutralize Service Workers (avoids broken offline caches on localhost)
@@ -745,7 +746,7 @@ function buildInjection(baseHref, targetOrigin) {
     `try{return new URL(u,document.baseURI||_origOrigin).href}catch(e){return u}` +
     `}` +
     `function _isProxied(u){` +
-    `return typeof u==='string'&&!u.startsWith('data:')&&!u.startsWith('blob:')&&!u.startsWith('javascript:')&&!u.startsWith('/api/proxy');` +
+    `return typeof u==='string'&&!u.startsWith('data:')&&!u.startsWith('blob:')&&!u.startsWith('javascript:')&&!u.startsWith('/api/proxy')&&!u.startsWith(_proxyApi)&&!u.startsWith(_proxyPage);` +
     `}` +
     // 4. Hook fetch() to route API calls through proxy-api
     `var _origFetch=window.fetch;` +
