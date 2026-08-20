@@ -55,6 +55,12 @@ const TIERS = [
     file: 'test/tier6_mega_comprehensive.test.js',
     minTests: 1000,
   },
+  {
+    tier: 'Tier 7',
+    name: 'Hyper-Scale 10,000+ Stress Suite',
+    file: 'test/tier7_hyper_10k.test.js',
+    minTests: 10000,
+  },
 ];
 
 async function runTestFile(file) {

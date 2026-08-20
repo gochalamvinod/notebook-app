@@ -1308,12 +1308,45 @@
     return m ? m[1] : null;
   }
 
+  function parseCloudDoc(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^www\./i, '');
+      // Google Drive file
+      if (host === 'drive.google.com') {
+        const fileMatch = u.pathname.match(/\/file\/d\/([\w-]+)/i);
+        if (fileMatch) return { type: 'gdrive', id: fileMatch[1], embedUrl: `https://drive.google.com/file/d/${fileMatch[1]}/preview` };
+        const idParam = u.searchParams.get('id');
+        if (idParam) return { type: 'gdrive', id: idParam, embedUrl: `https://drive.google.com/file/d/${idParam}/preview` };
+      }
+      // Google Docs / Sheets / Slides
+      if (host === 'docs.google.com') {
+        const docMatch = u.pathname.match(/\/(document|spreadsheets|presentation)\/d\/([\w-]+)/i);
+        if (docMatch) {
+          const docType = docMatch[1];
+          const docId = docMatch[2];
+          return { type: 'gdocs', id: docId, embedUrl: `https://docs.google.com/${docType}/d/${docId}/preview` };
+        }
+      }
+      // Dropbox
+      if (host === 'dropbox.com') {
+        const uClone = new URL(url);
+        uClone.searchParams.delete('dl');
+        uClone.searchParams.set('raw', '1');
+        return { type: 'dropbox', id: u.pathname, embedUrl: uClone.toString() };
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function classifyUrl(url) {
     if (IMAGE_EXT_RE.test(url)) return { type: 'image' };
     if (VIDEO_EXT_RE.test(url)) return { type: 'video' };
     const ytId = parseYouTubeId(url);
     if (ytId) return { type: 'youtube', id: ytId };
-    // Root youtube.com with no video ID — treat as a regular link (proxy it)
+    const cloudDoc = parseCloudDoc(url);
+    if (cloudDoc) return { type: 'cloud', details: cloudDoc };
     const vimeoId = parseVimeoId(url);
     if (vimeoId) return { type: 'vimeo', id: vimeoId };
     return { type: 'link' };
@@ -1325,6 +1358,10 @@
     const ytId = parseYouTubeId(trimmed);
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
+    }
+    const cloudDoc = parseCloudDoc(trimmed);
+    if (cloudDoc && cloudDoc.embedUrl) {
+      return cloudDoc.embedUrl;
     }
     // Root youtube.com — too JS-heavy to proxy directly; route via proxy→DuckDuckGo video search
     if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
@@ -1369,6 +1406,11 @@
     }
     if (kind.type === 'vimeo') {
       return buildLiveEmbedHTML(url, 'Vimeo Video', 'vimeo.com', '🎥');
+    }
+    if (kind.type === 'cloud') {
+      const docName = kind.details.type === 'gdrive' ? 'Google Drive File' : (kind.details.type === 'gdocs' ? 'Google Document' : 'Cloud Document');
+      const domain = kind.details.type === 'dropbox' ? 'dropbox.com' : 'google.com';
+      return buildLiveEmbedHTML(url, docName, domain, '📁');
     }
 
     // Generic link — embed a LIVE iframe of the actual website, with a
