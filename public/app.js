@@ -1326,9 +1326,13 @@
     if (ytId) {
       return `https://www.youtube-nocookie.com/embed/${ytId}?autoplay=0&rel=0&modestbranding=1`;
     }
+    // Root youtube.com — too JS-heavy to proxy; use DuckDuckGo video search
+    if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
+      return 'https://duckduckgo.com/html/?q=trending+videos';
+    }
     // Google search and root: route through iframe-friendly search
     if (/^(?:https?:\/\/)?(?:www\.)?google\.com\/?$/i.test(trimmed)) {
-      return `https://duckduckgo.com/html/`;
+      return 'https://duckduckgo.com/html/';
     }
     const googleSearchMatch = trimmed.match(/(?:google\.com\/search\?(?:.*&)?q=)([^&]+)/i);
     if (googleSearchMatch) {
