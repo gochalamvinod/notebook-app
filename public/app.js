@@ -749,6 +749,7 @@
     setupPageEditable(rightPageEl, 'right');
     setupDragDrop(leftPageEl);
     setupDragDrop(rightPageEl);
+    setupTouchSwipe();
 
     renderSpread();
 
@@ -757,12 +758,65 @@
     });
   }
 
-  // ---------- rendering a spread ----------
+  // ---------- mobile detection & touch swipe ----------
+  function isMobileView() {
+    return window.innerWidth <= 768;
+  }
+
+  let swipeWired = false;
+  function setupTouchSwipe() {
+    if (swipeWired || !pageViewportEl) return;
+    swipeWired = true;
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchEndX = 0;
+    let touchEndY = 0;
+
+    pageViewportEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchEndX = touchStartX;
+      touchEndY = touchStartY;
+    }, { passive: true });
+
+    pageViewportEl.addEventListener('touchmove', (e) => {
+      if (e.touches.length !== 1) return;
+      touchEndX = e.touches[0].clientX;
+      touchEndY = e.touches[0].clientY;
+    }, { passive: true });
+
+    pageViewportEl.addEventListener('touchend', () => {
+      const deltaX = touchEndX - touchStartX;
+      const deltaY = touchEndY - touchStartY;
+      if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3) {
+        if (deltaX < 0) {
+          flip('next');
+        } else {
+          flip('prev');
+        }
+      }
+    }, { passive: true });
+  }
+
+  window.addEventListener('resize', () => {
+    if (!notebook) return;
+    if (isMobileView()) {
+      leftIndex = Math.min(leftIndex, notebook.pages.length - 1);
+    } else {
+      leftIndex = Math.floor(leftIndex / 2) * 2;
+    }
+    renderSpread();
+  });
+
+  // ---------- rendering a spread / single page ----------
   function pageDataAt(i) {
     return notebook.pages[i] || null;
   }
 
   function renderSpread() {
+    const isMobile = isMobileView();
     const leftData = pageDataAt(leftIndex);
     const rightData = pageDataAt(leftIndex + 1);
 
@@ -770,21 +824,29 @@
     applyPageStyle(leftPageEl, leftData || {});
     underLeftEl.innerHTML = '';
 
-    if (rightData) {
+    if (!isMobile && rightData) {
       rightEmptyEl.hidden = true;
       rightPageEl.hidden = false;
       rightPageEl.innerHTML = rightData.html || '';
       applyPageStyle(rightPageEl, rightData);
-    } else {
+    } else if (!isMobile) {
       rightPageEl.hidden = true;
       rightPageEl.innerHTML = '';
       rightEmptyEl.hidden = false;
+    } else {
+      rightPageEl.hidden = true;
+      rightEmptyEl.hidden = true;
     }
     underRightEl.innerHTML = '';
 
     // Keep the active slot pointing somewhere real.
-    if (activeSlot === 'right' && !rightData) activeSlot = 'left';
-    activePageEl = activeSlot === 'right' ? rightPageEl : leftPageEl;
+    if (isMobile || activeSlot === 'left' || !rightData) {
+      activeSlot = 'left';
+      activePageEl = leftPageEl;
+    } else {
+      activeSlot = 'right';
+      activePageEl = rightPageEl;
+    }
 
     const activeData = activeSlot === 'right' ? rightData : leftData;
     if (activeData) {
@@ -796,11 +858,11 @@
 
     // Wire up image click overlays for the freshly-rendered pages.
     wireImageOverlays(leftPageEl);
-    wireImageOverlays(rightPageEl);
+    if (!isMobile) wireImageOverlays(rightPageEl);
 
     // Wire up drag-to-resize on live-embed iframe containers.
     wireEmbedResizers(leftPageEl);
-    wireEmbedResizers(rightPageEl);
+    if (!isMobile) wireEmbedResizers(rightPageEl);
   }
 
   function applyPageStyle(el, page) {
@@ -809,20 +871,31 @@
   }
 
   function updateNav() {
-    prevBtn.disabled = leftIndex <= 0 || flipping;
-    nextBtn.disabled = (leftIndex + 2) >= notebook.pages.length || flipping;
-    deletePageBtn.disabled = notebook.pages.length <= 1;
-    const totalSpreads = Math.max(1, Math.ceil(notebook.pages.length / 2));
-    const spreadNum = Math.floor(leftIndex / 2) + 1;
-    const pageWord = notebook.pages.length === 1 ? 'page' : 'pages';
-    pageIndicator.textContent = `Spread ${spreadNum} of ${totalSpreads} · ${notebook.pages.length} ${pageWord}`;
+    const isMobile = isMobileView();
+    if (isMobile) {
+      prevBtn.disabled = leftIndex <= 0 || flipping;
+      nextBtn.disabled = (leftIndex + 1) >= notebook.pages.length || flipping;
+      deletePageBtn.disabled = notebook.pages.length <= 1;
+      pageIndicator.textContent = `Page ${leftIndex + 1} of ${notebook.pages.length}`;
+    } else {
+      prevBtn.disabled = leftIndex <= 0 || flipping;
+      nextBtn.disabled = (leftIndex + 2) >= notebook.pages.length || flipping;
+      deletePageBtn.disabled = notebook.pages.length <= 1;
+      const totalSpreads = Math.max(1, Math.ceil(notebook.pages.length / 2));
+      const spreadNum = Math.floor(leftIndex / 2) + 1;
+      const pageWord = notebook.pages.length === 1 ? 'page' : 'pages';
+      pageIndicator.textContent = `Spread ${spreadNum} of ${totalSpreads} · ${notebook.pages.length} ${pageWord}`;
+    }
   }
 
   function syncSpreadFromDOM() {
+    const isMobile = isMobileView();
     const leftData = pageDataAt(leftIndex);
     if (leftData) leftData.html = leftPageEl.innerHTML;
-    const rightData = pageDataAt(leftIndex + 1);
-    if (rightData && !rightPageEl.hidden) rightData.html = rightPageEl.innerHTML;
+    if (!isMobile) {
+      const rightData = pageDataAt(leftIndex + 1);
+      if (rightData && !rightPageEl.hidden) rightData.html = rightPageEl.innerHTML;
+    }
   }
 
   // ---------- 3D page flip (three.js, with CSS fallback) ----------
@@ -866,11 +939,46 @@
 
   async function flip(direction) {
     if (flipping || !notebook) return;
-    const targetLeft = direction === 'next' ? leftIndex + 2 : leftIndex - 2;
+    const isMobile = isMobileView();
+    const step = isMobile ? 1 : 2;
+    const targetLeft = direction === 'next' ? leftIndex + step : leftIndex - step;
     if (direction === 'next' && targetLeft >= notebook.pages.length) return;
     if (direction === 'prev' && targetLeft < 0) return;
 
     syncSpreadFromDOM();
+
+    if (isMobile) {
+      flipping = true;
+      updateNav();
+      bookEl.classList.add('flipping');
+
+      leftPageEl.style.transition = 'opacity 0.16s ease, transform 0.16s ease';
+      leftPageEl.style.opacity = '0.3';
+      leftPageEl.style.transform = direction === 'next' ? 'translateX(-12px)' : 'translateX(12px)';
+
+      await new Promise((r) => setTimeout(r, 160));
+
+      leftIndex = targetLeft;
+      activeSlot = 'left';
+      renderSpread();
+
+      leftPageEl.style.transition = 'none';
+      leftPageEl.style.transform = direction === 'next' ? 'translateX(12px)' : 'translateX(-12px)';
+      void leftPageEl.offsetWidth;
+      leftPageEl.style.transition = 'opacity 0.16s ease, transform 0.16s ease';
+      leftPageEl.style.opacity = '1';
+      leftPageEl.style.transform = 'translateX(0)';
+
+      await new Promise((r) => setTimeout(r, 160));
+      leftPageEl.style.transition = '';
+      leftPageEl.style.transform = '';
+      leftPageEl.style.opacity = '';
+
+      flipping = false;
+      bookEl.classList.remove('flipping');
+      updateNav();
+      return;
+    }
 
     const flippingSlot = direction === 'next' ? 'right' : 'left';
     const frontEl = flippingSlot === 'right' ? rightPageEl : leftPageEl;
@@ -927,8 +1035,20 @@
   // ---------- add / delete pages ----------
   async function addPage() {
     syncSpreadFromDOM();
+    const isMobile = isMobileView();
     const base = pageDataAt(leftIndex) || pageDataAt(notebook.pages.length - 1) || { font: DEFAULT_FONT, fontSize: DEFAULT_SIZE };
     const newPage = { id: 'p-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), font: base.font, fontSize: base.fontSize, html: '' };
+
+    if (isMobile) {
+      notebook.pages.splice(leftIndex + 1, 0, newPage);
+      leftIndex = leftIndex + 1;
+      activeSlot = 'left';
+      renderSpread();
+      activePageEl = leftPageEl;
+      leftPageEl.focus();
+      scheduleSave();
+      return;
+    }
 
     if (!pageDataAt(leftIndex + 1)) {
       // Right slot of this spread is empty — fill it, no flip needed.
@@ -953,13 +1073,19 @@
 
   deletePageBtn.addEventListener('click', () => {
     if (notebook.pages.length <= 1) return;
-    const targetIdx = activeSlot === 'right' && pageDataAt(leftIndex + 1) ? leftIndex + 1 : leftIndex;
+    const isMobile = isMobileView();
+    const targetIdx = isMobile ? leftIndex : (activeSlot === 'right' && pageDataAt(leftIndex + 1) ? leftIndex + 1 : leftIndex);
     if (!pageDataAt(targetIdx)) return;
     if (!confirm('Delete this page? This cannot be undone.')) return;
 
     notebook.pages.splice(targetIdx, 1);
-    while (leftIndex > 0 && leftIndex >= notebook.pages.length) leftIndex -= 2;
-    leftIndex = Math.max(0, leftIndex);
+    if (isMobile) {
+      leftIndex = Math.min(leftIndex, notebook.pages.length - 1);
+      leftIndex = Math.max(0, leftIndex);
+    } else {
+      while (leftIndex > 0 && leftIndex >= notebook.pages.length) leftIndex -= 2;
+      leftIndex = Math.max(0, leftIndex);
+    }
     renderSpread();
     scheduleSave();
   });

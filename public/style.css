@@ -1193,19 +1193,167 @@ button, input, select {
 .settings-card .field { margin-bottom: 14px; }
 .settings-card .brass-link { margin-top: 10px; display: inline-block; }
 
-/* ---------------- Responsive ---------------- */
+/* ---------------- Responsive (Mobile & Tablet) ---------------- */
 
-@media (max-width: 760px) {
-  .toolbar { gap: 8px; padding: 10px 12px; }
-  .tool-group { padding: 4px 6px; }
-  .title-input { max-width: 120px; font-size: 1rem; }
-  .book { width: 97vw; height: 72vh; }
-  .page, .flip-face { padding: 30px 18px 18px; line-height: 30px; font-size: 16px; }
-  .page-empty { padding: 14px; font-size: 0.85rem; }
-  .spine-crease { width: 22px; }
-  .page-turn { width: 34px; height: 56px; font-size: 1.3rem; }
-  .page-turn.left { left: 2px; }
-  .page-turn.right { right: 2px; }
+@media (max-width: 768px) {
+  /* Toolbar */
+  .toolbar {
+    gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    justify-content: flex-start;
+  }
+  .tool-group {
+    padding: 3px 5px;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .title-input {
+    max-width: 110px;
+    font-size: 0.92rem;
+  }
+  .current-user-badge {
+    padding: 3px 7px;
+    font-size: 0.72rem;
+    flex-shrink: 0;
+  }
+  .save-status {
+    min-width: 50px;
+    font-size: 0.72rem;
+    flex-shrink: 0;
+  }
+
+  /* Book Room & Single Page Mobile Layout */
+  .book-room {
+    padding: 10px 8px 50px;
+  }
+  .book {
+    width: calc(100vw - 16px);
+    max-width: 540px;
+    height: calc(100vh - 130px);
+    min-height: 420px;
+    margin: 0 auto;
+  }
+  .page-viewport {
+    border-radius: 8px;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  }
+  .page-slot.slot-left {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+  }
+  .page-slot.slot-right {
+    display: none !important;
+  }
+  .spine-crease {
+    display: none !important;
+  }
+  .page-slot.slot-left .page {
+    border-radius: 8px;
+    padding: 24px 16px 20px;
+    font-size: 16px;
+    line-height: 32px;
+    background:
+      repeating-linear-gradient(to bottom, transparent 0px, transparent 31px, var(--rule-line) 32px),
+      var(--paper);
+  }
+  .flip-face {
+    padding: 24px 16px 20px;
+    font-size: 16px;
+    line-height: 32px;
+  }
+
+  /* Page Controls & Turn Buttons */
+  .page-turn {
+    width: 32px;
+    height: 48px;
+    font-size: 1.15rem;
+    background: rgba(44, 36, 22, 0.75);
+  }
+  .page-turn.left {
+    left: -4px;
+    border-radius: 0 6px 6px 0;
+  }
+  .page-turn.right {
+    right: -4px;
+    border-radius: 6px 0 0 6px;
+  }
+  .page-controls {
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 0.8rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .page-indicator {
+    font-size: 0.78rem;
+  }
+  .page-ctrl-btn {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+  }
+
+  /* Lock Screen */
+  .lock-screen {
+    padding: 16px 10px;
+    align-items: center;
+  }
+  .lock-card {
+    padding: 22px 14px 18px;
+    width: 100%;
+    max-width: 440px;
+    border-radius: 10px;
+  }
+  .lock-title {
+    font-size: 1.25rem;
+    margin: 8px 0 4px;
+  }
+  .lock-subtitle {
+    font-size: 0.8rem;
+    margin-bottom: 12px;
+  }
+  .lock-tabs {
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: 14px;
+  }
+  .lock-tab-btn {
+    font-size: 0.76rem;
+    padding: 6px 4px;
+  }
+  .lock-book-card {
+    padding: 9px 10px;
+    gap: 8px;
+  }
+  .lock-book-title {
+    font-size: 0.88rem;
+  }
+  .lock-book-open-btn {
+    padding: 5px 8px;
+    font-size: 0.74rem;
+  }
+  .cover-color-palette--compact {
+    gap: 4px;
+  }
+  .cover-chip {
+    font-size: 0.7rem;
+    padding: 3px 6px;
+  }
+
+  /* Modals */
+  .modal-dialog {
+    max-width: 95vw;
+    width: 95vw;
+    max-height: 85vh;
+    padding: 18px 14px;
+  }
+  .bookshelf-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
 }
 
 .lock-card.shake { animation: shakeKf 0.4s; }
