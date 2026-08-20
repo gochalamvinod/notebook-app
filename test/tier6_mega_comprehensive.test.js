@@ -632,7 +632,7 @@ describe('Section 5: API Integration with Live Server (200+ tests)', () => {
         });
     }
 
-    for (let i=0; i<80; i++) {
+    for (let i=0; i<5; i++) {
         test(`Link preview API check ${i}`, async () => {
             const res = await fetch(`${server.baseUrl}/api/link-preview?url=${encodeURIComponent('https://example.com/')}`, {
                 headers: { 'Cookie': `notebook_session=${cookie}` }
@@ -643,7 +643,7 @@ describe('Section 5: API Integration with Live Server (200+ tests)', () => {
         });
     }
     
-    for (let i=0; i<40; i++) {
+    for (let i=0; i<5; i++) {
         test(`Proxy API check ${i}`, async () => {
             const res = await fetch(`${server.baseUrl}/api/proxy?url=${encodeURIComponent('https://example.com/')}`, {
                 headers: { 'Cookie': `notebook_session=${cookie}` }

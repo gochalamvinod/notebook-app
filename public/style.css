@@ -460,6 +460,9 @@ button, input, select {
   box-shadow: 0 4px 18px rgba(44, 36, 22, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
   background: var(--paper);
   max-width: 100%;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
   transition: box-shadow 0.2s, border-color 0.2s;
 }
 .nb-live-embed:hover {
@@ -630,6 +633,9 @@ button, input, select {
   border: 0;
   z-index: 2;
   background: #fff;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
 }
 .nb-live-embed__video {
   position: absolute;
@@ -1390,4 +1396,279 @@ button, input, select {
   background: var(--brass);
   color: #1a120b;
 }
+
+/* ============================================================
+   Lock Screen Book Count Badge & Rate Lockout Warning
+   ============================================================ */
+
+.lock-book-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(184, 147, 90, 0.15);
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  color: var(--brass-bright);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin: 6px auto 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.lock-book-icon {
+  font-size: 0.95rem;
+}
+
+.lockout-warning {
+  color: #ff7b72 !important;
+  background: rgba(139, 58, 58, 0.25);
+  border: 1px solid rgba(255, 123, 114, 0.4);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(255, 123, 114, 0.4); }
+  50% { border-color: rgba(255, 123, 114, 0.8); }
+}
+
+/* ============================================================
+   Emoji Picker Popover
+   ============================================================ */
+
+.emoji-picker-popover {
+  position: absolute;
+  top: 60px;
+  left: 320px;
+  z-index: 100;
+  width: 330px;
+  background: linear-gradient(165deg, var(--cover-mid), var(--cover-dark));
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(184, 147, 90, 0.2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(10px);
+}
+
+.emoji-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.emoji-search-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(184, 147, 90, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--paper);
+  font-size: 0.85rem;
+  outline: none;
+}
+.emoji-search-input:focus {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 2px rgba(184, 147, 90, 0.2);
+}
+
+.emoji-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--brass);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.emoji-close-btn:hover {
+  background: rgba(184, 147, 90, 0.2);
+  color: var(--brass-bright);
+}
+
+.emoji-categories {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(184, 147, 90, 0.2);
+  padding-bottom: 6px;
+  overflow-x: auto;
+}
+
+.emoji-cat-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.emoji-cat-btn:hover {
+  background: rgba(184, 147, 90, 0.2);
+  transform: translateY(-1px);
+}
+.emoji-cat-btn.active {
+  background: rgba(184, 147, 90, 0.35);
+  box-shadow: inset 0 0 0 1px var(--brass);
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.emoji-item-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s, background 0.1s;
+}
+.emoji-item-btn:hover {
+  background: rgba(184, 147, 90, 0.25);
+  transform: scale(1.2);
+}
+.emoji-item-btn:active {
+  transform: scale(0.95);
+}
+
+/* ============================================================
+   Media Upload Progress Toast & Video / Audio Styling
+   ============================================================ */
+
+.media-upload-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 100000;
+  min-width: 320px;
+  max-width: 420px;
+  background: linear-gradient(135deg, #1f2b23, #131c16);
+  border: 1px solid var(--brass);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(184, 147, 90, 0.25);
+  padding: 16px 20px;
+  color: var(--brass-bright);
+  font-family: inherit;
+  animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toast-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast-icon {
+  font-size: 1.25rem;
+}
+
+.toast-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.toast-progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(184, 147, 90, 0.25);
+}
+
+.toast-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brass), var(--brass-bright));
+  border-radius: 4px;
+  transition: width 0.15s ease-out;
+  box-shadow: 0 0 8px rgba(229, 199, 140, 0.5);
+}
+
+.toast-stats {
+  font-size: 0.8rem;
+  color: var(--brass-dim);
+  text-align: right;
+  font-feature-settings: 'tnum';
+}
+
+/* Video & Audio in Notebook Pages */
+.media-container {
+  display: block;
+  position: relative;
+  margin: 14px 0;
+  max-width: 100%;
+  clear: both;
+}
+
+.video-container {
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(184, 147, 90, 0.3);
+}
+
+.vintage-video {
+  display: block;
+  width: 100%;
+  max-height: 480px;
+  border-radius: 8px;
+  background: #000;
+  outline: none;
+}
+
+.vintage-video::-webkit-media-controls-panel {
+  background-image: linear-gradient(to top, rgba(20, 28, 22, 0.95), rgba(30, 42, 34, 0.85));
+}
+
+.audio-container {
+  padding: 10px 14px;
+  background: rgba(184, 147, 90, 0.12);
+  border: 1px solid rgba(184, 147, 90, 0.35);
+  border-radius: 8px;
+}
+
+.vintage-audio {
+  width: 100%;
+  display: block;
+  outline: none;
+}
+
 

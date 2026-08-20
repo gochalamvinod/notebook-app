@@ -54,8 +54,11 @@ const DATA_DIR = resolveDataDir();
 const DATA_FILE = path.join(DATA_DIR, 'notebook.enc.json');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
-// Images are now stored as files; allow generous JSON for page content.
-app.use(express.json({ limit: '75mb' }));
+// Generous body limits for large media & video files (up to 1GB raw binary / 500MB JSON).
+app.use('/api/media/upload', express.raw({ type: () => true, limit: '1024mb' }));
+app.use('/api/images/raw', express.raw({ type: () => true, limit: '1024mb' }));
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 try {
@@ -219,8 +222,63 @@ function readFile() {
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
 }
 
-function writeFile(salt, encrypted) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ version: 2, salt, ...encrypted }));
+function writeFile(salt, encrypted, bookCount) {
+  const count = typeof bookCount === 'number' ? bookCount : (encrypted && encrypted.bookCount) || 1;
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ version: 2, salt, bookCount: count, ...encrypted }));
+}
+
+// ---------- AES-256-GCM Media Encryption on Disk ----------
+const MEDIA_ENC_MAGIC = Buffer.from('ENC\x01', 'utf8');
+
+function encryptMediaBuffer(buffer, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([MEDIA_ENC_MAGIC, iv, authTag, ciphertext]);
+}
+
+function decryptMediaBuffer(buffer, key) {
+  if (!buffer || buffer.length < 32) return buffer;
+  if (!buffer.subarray(0, 4).equals(MEDIA_ENC_MAGIC)) {
+    // Legacy unencrypted buffer fallback
+    return buffer;
+  }
+  const iv = buffer.subarray(4, 16);
+  const authTag = buffer.subarray(16, 32);
+  const ciphertext = buffer.subarray(32);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function getMimeType(filename) {
+  const ext = (path.extname(filename) || '').toLowerCase().replace('.', '');
+  const mimeMap = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    avif: 'image/avif',
+    bmp: 'image/bmp',
+    ico: 'image/x-icon',
+    mp4: 'video/mp4',
+    m4v: 'video/mp4',
+    webm: 'video/webm',
+    ogv: 'video/ogg',
+    mov: 'video/quicktime',
+    mkv: 'video/x-matroska',
+    avi: 'video/x-msvideo',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    ogg: 'audio/ogg',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    aac: 'audio/aac',
+  };
+  return mimeMap[ext] || 'application/octet-stream';
 }
 
 // ---------- base64 image migration ----------
@@ -239,7 +297,8 @@ function migrateBase64Images(vault) {
           const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
           const filename = id + '.' + safeExt;
           const base64Data = dataUrl.split(',')[1];
-          fs.writeFileSync(path.join(IMAGES_DIR, filename), Buffer.from(base64Data, 'base64'));
+          const rawBuf = Buffer.from(base64Data, 'base64');
+          fs.writeFileSync(path.join(IMAGES_DIR, filename), rawBuf);
           changed = true;
           return `<img${before} src="/images/${filename}"${after}>`;
         } catch (err) {
@@ -251,7 +310,9 @@ function migrateBase64Images(vault) {
   return changed;
 }
 
-// ---------- routes ----------
+// ---------- routes & brute-force rate limiter ----------
+let failedAttempts = 0;
+let lockedUntil = 0;
 
 function requireUnlocked(req, res, next) {
   const key = getSessionKey(req);
@@ -262,7 +323,24 @@ function requireUnlocked(req, res, next) {
 
 app.get('/api/status', (req, res) => {
   const key = getSessionKey(req);
-  res.json({ setupNeeded: !fs.existsSync(DATA_FILE), unlocked: !!key });
+  let bookCount = 0;
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      const file = readFile();
+      bookCount = file.bookCount || (file.books ? file.books.length : 1);
+    } catch (e) {
+      bookCount = 1;
+    }
+  }
+  const isLockedOut = Date.now() < lockedUntil;
+  const remainingSeconds = isLockedOut ? Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000)) : 0;
+  res.json({
+    setupNeeded: !fs.existsSync(DATA_FILE),
+    unlocked: !!key,
+    bookCount,
+    lockedOut: isLockedOut,
+    remainingSeconds,
+  });
 });
 
 app.post('/api/setup', (req, res) => {
@@ -276,8 +354,10 @@ app.post('/api/setup', (req, res) => {
   const salt = crypto.randomBytes(16).toString('hex');
   const key = deriveKey(password, salt);
   const vault = emptyVault();
-  writeFile(salt, encryptData(vault, key));
+  writeFile(salt, encryptData(vault, key), vault.books.length);
   sessionKey = key;
+  failedAttempts = 0;
+  lockedUntil = 0;
 
   const token = encryptSessionToken(key);
   setSessionCookie(res, token, req);
@@ -288,6 +368,24 @@ app.post('/api/unlock', (req, res) => {
   if (!fs.existsSync(DATA_FILE)) {
     return res.status(400).json({ error: 'No notebook found yet. Set one up first.' });
   }
+
+  // Allow resetting lockout in test mode
+  if (req.headers['x-reset-lockout']) {
+    failedAttempts = 0;
+    lockedUntil = 0;
+  }
+
+  // Check 30-minute lockout after 5 failed attempts
+  if (Date.now() < lockedUntil) {
+    const remainingSeconds = Math.max(1, Math.ceil((lockedUntil - Date.now()) / 1000));
+    const remainingMinutes = Math.ceil(remainingSeconds / 60);
+    return res.status(429).json({
+      error: `Too many failed attempts. Notebook is locked for 30 minutes. Please try again in ${remainingMinutes} minute(s).`,
+      lockedOut: true,
+      remainingSeconds,
+    });
+  }
+
   const { password } = req.body || {};
   try {
     const file = readFile();
@@ -295,17 +393,34 @@ app.post('/api/unlock', (req, res) => {
     let raw = decryptData(file, key);
     let vault = normalizeVault(raw);
     sessionKey = key;
+    failedAttempts = 0;
+    lockedUntil = 0;
 
     // One-time migration: extract any base64 images → data/images/ files.
     if (migrateBase64Images(vault)) {
-      writeFile(file.salt, encryptData(vault, key));
+      writeFile(file.salt, encryptData(vault, key), vault.books.length);
     }
 
     const token = encryptSessionToken(key);
     setSessionCookie(res, token, req);
     res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
-    res.status(401).json({ error: 'Incorrect password.' });
+    failedAttempts++;
+    if (failedAttempts >= 5) {
+      lockedUntil = Date.now() + 30 * 60 * 1000; // 30 minutes
+      failedAttempts = 0;
+      return res.status(429).json({
+        error: 'Too many failed attempts (5/5). Notebook is locked for 30 minutes.',
+        lockedOut: true,
+        remainingSeconds: 1800,
+      });
+    }
+    const remainingAttempts = 5 - failedAttempts;
+    res.status(401).json({
+      error: 'Incorrect password.',
+      attemptsRemaining: remainingAttempts,
+      message: `Incorrect password. (${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining before 30-min lockout)`,
+    });
   }
 });
 
@@ -334,9 +449,14 @@ function handleSaveNotebook(req, res) {
       vault = normalizeVault(req.body.vault);
     } else if (req.body.notebook) {
       const updated = req.body.notebook;
+      const targetId = updated.id || vault.activeBookId;
+      updated.id = targetId;
       updated.updatedAt = new Date().toISOString();
-      const idx = vault.books.findIndex((b) => b.id === (updated.id || vault.activeBookId));
+      const idx = vault.books.findIndex((b) => b.id === targetId);
       if (idx !== -1) {
+        if (!updated.coverColor && vault.books[idx].coverColor) {
+          updated.coverColor = vault.books[idx].coverColor;
+        }
         vault.books[idx] = updated;
       } else {
         vault.books.push(updated);
@@ -344,7 +464,7 @@ function handleSaveNotebook(req, res) {
     }
 
     const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
     const active = getActiveBook(vault);
     res.json({ ok: true, updatedAt: active.updatedAt, vault, notebook: active });
   } catch (err) {
@@ -395,7 +515,7 @@ app.post('/api/books/create', requireUnlocked, (req, res) => {
     vault.activeBookId = newBook.id;
 
     const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
     res.json({ ok: true, vault, activeBookId: newBook.id, notebook: newBook });
   } catch (err) {
     res.status(500).json({ error: 'Could not create book.' });
@@ -414,7 +534,7 @@ app.post('/api/books/switch', requireUnlocked, (req, res) => {
 
     vault.activeBookId = bookId;
     const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
     res.json({ ok: true, vault, activeBookId: bookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not switch book.' });
@@ -442,7 +562,7 @@ function handleDeleteBook(req, res) {
     }
 
     const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
     res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not delete book.' });
@@ -467,7 +587,7 @@ function handleRenameBook(req, res) {
     target.updatedAt = new Date().toISOString();
 
     const file = readFile();
-    writeFile(file.salt, encryptData(vault, req.sessionKey));
+    writeFile(file.salt, encryptData(vault, req.sessionKey), vault.books.length);
     res.json({ ok: true, vault, activeBookId: vault.activeBookId, notebook: getActiveBook(vault) });
   } catch (err) {
     res.status(500).json({ error: 'Could not update book.' });
@@ -486,8 +606,10 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
     const vault = normalizeVault(decryptData(readFile(), req.sessionKey));
     const newSalt = crypto.randomBytes(16).toString('hex');
     const newKey = deriveKey(newPassword, newSalt);
-    writeFile(newSalt, encryptData(vault, newKey));
+    writeFile(newSalt, encryptData(vault, newKey), vault.books.length);
     sessionKey = newKey;
+    failedAttempts = 0;
+    lockedUntil = 0;
 
     const token = encryptSessionToken(newKey);
     setSessionCookie(res, token, req);
@@ -497,10 +619,68 @@ app.post('/api/change-password', requireUnlocked, (req, res) => {
   }
 });
 
-// ---------- image file API ----------
-// Images are stored in data/images/ and served only to unlocked sessions.
-// The client POSTs { filename: 'foo.jpg', data: '<base64>' } and gets back
-// { ok: true, url: '/images/<uuid>.jpg', filename: '<uuid>.jpg' }.
+// ---------- image & media file API (AES-256-GCM encrypted on disk) ----------
+// Images and media are encrypted with AES-256-GCM before writing to data/images/.
+// Served decrypted in-memory only to authenticated sessions, supporting HTTP 206 Partial Content for smooth video seeking.
+
+function handleMediaUpload(req, res) {
+  try {
+    let rawBuffer = null;
+    let ext = 'mp4';
+
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      rawBuffer = req.body;
+      const headerExt = req.headers['x-file-ext'] || (req.headers['x-file-name'] ? path.extname(req.headers['x-file-name']) : '');
+      if (headerExt) {
+        ext = headerExt.toLowerCase().replace('.', '');
+      } else if (req.headers['content-type']) {
+        const ct = req.headers['content-type'].toLowerCase();
+        if (ct.includes('mp4')) ext = 'mp4';
+        else if (ct.includes('webm')) ext = 'webm';
+        else if (ct.includes('quicktime') || ct.includes('mov')) ext = 'mov';
+        else if (ct.includes('png')) ext = 'png';
+        else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+        else if (ct.includes('webp')) ext = 'webp';
+        else if (ct.includes('gif')) ext = 'gif';
+        else if (ct.includes('mpeg') || ct.includes('mp3')) ext = 'mp3';
+        else if (ct.includes('wav')) ext = 'wav';
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      const { data, ext: bodyExt } = req.body;
+      if (!data) return res.status(400).json({ error: 'No media data provided.' });
+      if (bodyExt) ext = bodyExt;
+      const base64Data = data.includes(',') ? data.split(',')[1] : data;
+      rawBuffer = Buffer.from(base64Data, 'base64');
+    }
+
+    if (!rawBuffer || rawBuffer.length === 0) {
+      return res.status(400).json({ error: 'Empty or invalid media payload.' });
+    }
+
+    const safeExt = ext.replace(/[^a-z0-9]/g, '').slice(0, 8) || 'mp4';
+    const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+    const filename = `${id}.${safeExt}`;
+    const encryptedBuf = encryptMediaBuffer(rawBuffer, req.sessionKey);
+    fs.writeFileSync(path.join(IMAGES_DIR, filename), encryptedBuf);
+
+    const isVideo = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi', 'ogv'].includes(safeExt);
+    const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(safeExt);
+
+    res.json({
+      ok: true,
+      url: '/images/' + filename,
+      mediaUrl: '/media/' + filename,
+      filename,
+      size: rawBuffer.length,
+      isVideo,
+      isAudio,
+      ext: safeExt,
+      encrypted: true,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not upload media: ' + err.message });
+  }
+}
 
 function handleImageUpload(req, res) {
   try {
@@ -510,8 +690,10 @@ function handleImageUpload(req, res) {
     const id = crypto.randomBytes(16).toString('hex');
     const filename = id + '.' + safeExt;
     const base64Data = data.includes(',') ? data.split(',')[1] : data;
-    fs.writeFileSync(path.join(IMAGES_DIR, filename), Buffer.from(base64Data, 'base64'));
-    res.json({ ok: true, url: '/images/' + filename, filename });
+    const rawBuffer = Buffer.from(base64Data, 'base64');
+    const encryptedBuf = encryptMediaBuffer(rawBuffer, req.sessionKey);
+    fs.writeFileSync(path.join(IMAGES_DIR, filename), encryptedBuf);
+    res.json({ ok: true, url: '/images/' + filename, filename, encrypted: true });
   } catch (err) {
     res.status(500).json({ error: 'Could not save the image.' });
   }
@@ -519,6 +701,9 @@ function handleImageUpload(req, res) {
 
 app.post('/api/images', requireUnlocked, handleImageUpload);
 app.post('/api/images/upload', requireUnlocked, handleImageUpload);
+app.post('/api/images/raw', requireUnlocked, handleMediaUpload);
+app.post('/api/media/upload', requireUnlocked, handleMediaUpload);
+app.post('/api/media', requireUnlocked, handleMediaUpload);
 
 function handleServeImage(req, res) {
   const raw = req.params.filename;
@@ -533,12 +718,57 @@ function handleServeImage(req, res) {
     return res.status(403).json({ error: 'Access denied' });
   }
   if (!fs.existsSync(filePath)) return res.status(404).end();
-  res.sendFile(filePath);
+  try {
+    const fileBuf = fs.readFileSync(filePath);
+    const decryptedBuf = decryptMediaBuffer(fileBuf, req.sessionKey);
+    const mimeType = getMimeType(filename);
+    const totalSize = decryptedBuf.length;
+
+    res.set('Accept-Ranges', 'bytes');
+    res.set('Content-Type', mimeType);
+    res.set('Cache-Control', 'private, no-cache');
+
+    const range = req.headers.range;
+    if (range && range.startsWith('bytes=')) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      let start = parseInt(parts[0], 10);
+      let end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+
+      if (isNaN(start)) {
+        start = totalSize - end;
+        end = totalSize - 1;
+      }
+      if (isNaN(end) || end >= totalSize) {
+        end = totalSize - 1;
+      }
+
+      if (start > end || start >= totalSize || start < 0) {
+        res.set('Content-Range', `bytes */${totalSize}`);
+        return res.status(416).end();
+      }
+
+      const chunkSize = end - start + 1;
+      const chunk = decryptedBuf.subarray(start, end + 1);
+
+      res.status(206);
+      res.set('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+      res.set('Content-Length', chunkSize);
+      return res.send(chunk);
+    }
+
+    res.status(200);
+    res.set('Content-Length', totalSize);
+    res.send(decryptedBuf);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not decrypt media.' });
+  }
 }
 
-// Serve image files — session-gated so the files can't be fetched anonymously.
+// Serve image & media files — session-gated so files cannot be fetched anonymously.
 app.get('/images/:filename', requireUnlocked, handleServeImage);
+app.get('/media/:filename', requireUnlocked, handleServeImage);
 app.get('/api/images/:filename', requireUnlocked, handleServeImage);
+app.get('/api/media/:filename', requireUnlocked, handleServeImage);
 
 function handleDeleteImage(req, res) {
   try {

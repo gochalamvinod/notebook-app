@@ -695,4 +695,243 @@ describe('Tier 2: API Integration Tests', () => {
       assert.equal(json.notebook.title, 'Atomic Vault Book');
     });
   });
+
+  describe('Enhanced Security & Media/Emoji Capabilities', () => {
+    let secServer;
+    let secCookie;
+    const secPass = 'SecurityMasterKey_2026!';
+
+    before(async () => {
+      secServer = await spawnTestServer();
+      const setupRes = await fetch(`${secServer.baseUrl}/api/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: secPass }),
+      });
+      assert.equal(setupRes.status, 200);
+      secCookie = extractCookie(setupRes);
+    });
+
+    after(async () => {
+      if (secServer) await secServer.stop();
+    });
+
+    test('GET /api/status returns bookCount before unlocking', async () => {
+      // Create 2 additional books
+      await fetch(`${secServer.baseUrl}/api/books/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `notebook_session=${secCookie}` },
+        body: JSON.stringify({ title: 'Book Two' }),
+      });
+      await fetch(`${secServer.baseUrl}/api/books/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `notebook_session=${secCookie}` },
+        body: JSON.stringify({ title: 'Book Three' }),
+      });
+
+      // Lock
+      await fetch(`${secServer.baseUrl}/api/lock`, { method: 'POST' });
+
+      // Check status without cookie
+      const statusRes = await fetch(`${secServer.baseUrl}/api/status`);
+      assert.equal(statusRes.status, 200);
+      const statusJson = await statusRes.json();
+      assert.equal(statusJson.unlocked, false);
+      assert.equal(statusJson.bookCount, 3, 'Status should report 3 books before password entry');
+    });
+
+    test('5 consecutive failed password attempts triggers 30-minute lockout (HTTP 429)', async () => {
+      for (let i = 1; i <= 4; i++) {
+        const failRes = await fetch(`${secServer.baseUrl}/api/unlock`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: 'BadPassword_' + i }),
+        });
+        assert.equal(failRes.status, 401);
+        const failJson = await failRes.json();
+        assert.equal(failJson.attemptsRemaining, 5 - i);
+      }
+
+      // 5th failed attempt triggers 429 lockout
+      const fifthRes = await fetch(`${secServer.baseUrl}/api/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'BadPassword_5' }),
+      });
+      assert.equal(fifthRes.status, 429);
+      const fifthJson = await fifthRes.json();
+      assert.equal(fifthJson.lockedOut, true);
+      assert.ok(fifthJson.error.includes('30 minutes'));
+
+      // 6th attempt is rejected by lockout
+      const sixthRes = await fetch(`${secServer.baseUrl}/api/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: secPass }),
+      });
+      assert.equal(sixthRes.status, 429);
+
+      // Verify status reports lockout
+      const statusLockRes = await fetch(`${secServer.baseUrl}/api/status`);
+      const statusLockJson = await statusLockRes.json();
+      assert.equal(statusLockJson.lockedOut, true);
+      assert.ok(statusLockJson.remainingSeconds > 0);
+
+      // Unlock with test reset header
+      const resetRes = await fetch(`${secServer.baseUrl}/api/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-reset-lockout': '1' },
+        body: JSON.stringify({ password: secPass }),
+      });
+      assert.equal(resetRes.status, 200);
+      secCookie = extractCookie(resetRes);
+    });
+
+    test('Images are encrypted with AES-256-GCM on disk and served decrypted in-memory', async () => {
+      const samplePng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const uploadRes = await fetch(`${secServer.baseUrl}/api/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `notebook_session=${secCookie}` },
+        body: JSON.stringify({ data: `data:image/png;base64,${samplePng}`, ext: 'png' }),
+      });
+      assert.equal(uploadRes.status, 200);
+      const uploadJson = await uploadRes.json();
+      assert.ok(uploadJson.ok);
+      const filename = path.basename(uploadJson.url);
+
+      // Verify file on disk is encrypted with AES-256-GCM (starts with ENC\x01 magic header)
+      const diskBytes = fs.readFileSync(path.join(secServer.imagesDir, filename));
+      assert.equal(diskBytes.subarray(0, 4).toString('utf8'), 'ENC\x01', 'File on disk must have ENC\x01 encryption header');
+      assert.notDeepEqual(diskBytes, Buffer.from(samplePng, 'base64'), 'File on disk must NOT match raw plaintext PNG bytes');
+
+      // Verify GET /images/:filename returns decrypted binary PNG
+      const serveRes = await fetch(`${secServer.baseUrl}/images/${filename}`, {
+        headers: { Cookie: `notebook_session=${secCookie}` },
+      });
+      assert.equal(serveRes.status, 200);
+      assert.equal(serveRes.headers.get('content-type'), 'image/png');
+      const servedBytes = await serveRes.arrayBuffer();
+      assert.deepEqual(Buffer.from(servedBytes), Buffer.from(samplePng, 'base64'), 'Served bytes must match original decrypted image');
+    });
+
+    test('Supports rich emojis and Unicode across pages and notebook saving', async () => {
+      const emojiPage = {
+        title: 'Emoji & Unicode Journal 📔',
+        pages: [
+          {
+            id: 'p-emoji-1',
+            html: '<p>Exploring the world with emojis! 🚀 ✨ 🔒 📚 🌿 ☕ ❤️ 🔥 🧠 💎</p><p>Multi-byte Unicode: 👨‍💻 👩‍🚀 🏳️‍🌈 日本語 Español</p>',
+          },
+        ],
+      };
+
+      const saveRes = await fetch(`${secServer.baseUrl}/api/notebook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: `notebook_session=${secCookie}` },
+        body: JSON.stringify({ notebook: emojiPage }),
+      });
+      assert.equal(saveRes.status, 200);
+      const saveJson = await saveRes.json();
+      assert.ok(saveJson.ok);
+
+      // Read back
+      const readRes = await fetch(`${secServer.baseUrl}/api/notebook`, {
+        headers: { Cookie: `notebook_session=${secCookie}` },
+      });
+      assert.equal(readRes.status, 200);
+      const readJson = await readRes.json();
+      assert.ok(readJson.notebook.pages[0].html.includes('🚀 ✨ 🔒 📚 🌿 ☕ ❤️ 🔥 🧠 💎'));
+      assert.ok(readJson.notebook.pages[0].html.includes('👨‍💻 👩‍🚀 🏳️‍🌈 日本語 Español'));
+    });
+
+    test('POST /api/media/upload supports raw binary video uploads up to 1GB', async () => {
+      // Create a 5MB synthetic MP4 video buffer
+      const videoBuffer = Buffer.alloc(5 * 1024 * 1024);
+      videoBuffer.fill(0x55);
+      videoBuffer.write('ftypisom', 4, 'utf8'); // fake MP4 header
+
+      const uploadRes = await fetch(`${secServer.baseUrl}/api/media/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'video/mp4',
+          'X-File-Name': 'test_video_large.mp4',
+          'X-File-Ext': 'mp4',
+          Cookie: `notebook_session=${secCookie}`,
+        },
+        body: videoBuffer,
+      });
+
+      assert.equal(uploadRes.status, 200);
+      const uploadJson = await uploadRes.json();
+      assert.equal(uploadJson.ok, true);
+      assert.equal(uploadJson.isVideo, true);
+      assert.equal(uploadJson.ext, 'mp4');
+      assert.equal(uploadJson.size, videoBuffer.length);
+      assert.ok(uploadJson.url.startsWith('/images/'));
+
+      const filename = path.basename(uploadJson.url);
+
+      // Verify file on disk is encrypted with AES-256-GCM
+      const diskBytes = fs.readFileSync(path.join(secServer.imagesDir, filename));
+      assert.equal(diskBytes.subarray(0, 4).toString('utf8'), 'ENC\x01');
+
+      // Test HTTP 206 Partial Content / Range header seeking (e.g. bytes=1000-4999)
+      const rangeStart = 1000;
+      const rangeEnd = 4999;
+      const rangeRes = await fetch(`${secServer.baseUrl}/media/${filename}`, {
+        headers: {
+          Cookie: `notebook_session=${secCookie}`,
+          Range: `bytes=${rangeStart}-${rangeEnd}`,
+        },
+      });
+
+      assert.equal(rangeRes.status, 206, 'Should respond with 206 Partial Content for Range header');
+      assert.equal(rangeRes.headers.get('content-range'), `bytes ${rangeStart}-${rangeEnd}/${videoBuffer.length}`);
+      assert.equal(rangeRes.headers.get('content-length'), String(rangeEnd - rangeStart + 1));
+      assert.equal(rangeRes.headers.get('content-type'), 'video/mp4');
+      assert.equal(rangeRes.headers.get('accept-ranges'), 'bytes');
+
+      const chunk = Buffer.from(await rangeRes.arrayBuffer());
+      assert.equal(chunk.length, rangeEnd - rangeStart + 1);
+      assert.deepEqual(chunk, videoBuffer.subarray(rangeStart, rangeEnd + 1), 'Range bytes must match decrypted slice');
+    });
+
+    test('HTTP 206 Partial Content handles open-ended range and out-of-bounds ranges', async () => {
+      const audioBuffer = Buffer.alloc(64 * 1024);
+      audioBuffer.fill(0xaa);
+
+      const uploadRes = await fetch(`${secServer.baseUrl}/api/media/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'audio/mp3',
+          'X-File-Name': 'audio_sample.mp3',
+          'X-File-Ext': 'mp3',
+          Cookie: `notebook_session=${secCookie}`,
+        },
+        body: audioBuffer,
+      });
+
+      const uploadJson = await uploadRes.json();
+      const filename = path.basename(uploadJson.url);
+
+      // Open-ended range (bytes=32768-)
+      const openRangeRes = await fetch(`${secServer.baseUrl}/images/${filename}`, {
+        headers: {
+          Cookie: `notebook_session=${secCookie}`,
+          Range: 'bytes=32768-',
+        },
+      });
+      assert.equal(openRangeRes.status, 206);
+      assert.equal(openRangeRes.headers.get('content-range'), `bytes 32768-${64 * 1024 - 1}/${64 * 1024}`);
+
+      // Invalid / out-of-bounds range
+      const invalidRangeRes = await fetch(`${secServer.baseUrl}/images/${filename}`, {
+        headers: {
+          Cookie: `notebook_session=${secCookie}`,
+          Range: 'bytes=999999-1000000',
+        },
+      });
+      assert.equal(invalidRangeRes.status, 416, 'Out of bounds range must return 416 Range Not Satisfiable');
+    });
+  });
 });

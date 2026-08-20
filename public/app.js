@@ -16,6 +16,8 @@
   const lockCard = document.querySelector('.lock-card');
   const lockTitle = document.getElementById('lockTitle');
   const lockSubtitle = document.getElementById('lockSubtitle');
+  const lockBookCountBadge = document.getElementById('lockBookCountBadge');
+  const lockBookCountText = document.getElementById('lockBookCountText');
   const lockForm = document.getElementById('lockForm');
   const passwordInput = document.getElementById('passwordInput');
   const confirmField = document.getElementById('confirmField');
@@ -45,8 +47,20 @@
   const sizeSelect = document.getElementById('sizeSelect');
   const colorInput = document.getElementById('colorInput');
   const highlightInput = document.getElementById('highlightInput');
+  const emojiBtn = document.getElementById('emojiBtn');
+  const emojiPicker = document.getElementById('emojiPicker');
+  const emojiSearch = document.getElementById('emojiSearch');
+  const closeEmojiPickerBtn = document.getElementById('closeEmojiPickerBtn');
+  const emojiCategories = document.getElementById('emojiCategories');
+  const emojiGrid = document.getElementById('emojiGrid');
   const imageBtn = document.getElementById('imageBtn');
   const imageFile = document.getElementById('imageFile');
+  const videoBtn = document.getElementById('videoBtn');
+  const videoFile = document.getElementById('videoFile');
+  const mediaUploadToast = document.getElementById('mediaUploadToast');
+  const toastTitle = document.getElementById('toastTitle');
+  const toastProgressFill = document.getElementById('toastProgressFill');
+  const toastStats = document.getElementById('toastStats');
   const linkBtn = document.getElementById('linkBtn');
   const saveStatus = document.getElementById('saveStatus');
   const settingsBtn = document.getElementById('settingsBtn');
@@ -109,10 +123,44 @@
   let savedRange = null;
   let mode = 'unlock'; // or 'setup'
 
+  let lockoutTimer = null;
+
+  function startLockoutCountdown(remainingSeconds) {
+    if (lockoutTimer) clearInterval(lockoutTimer);
+    let secondsLeft = remainingSeconds;
+    if (passwordInput) passwordInput.disabled = true;
+    if (lockSubmit) lockSubmit.disabled = true;
+
+    function update() {
+      if (secondsLeft <= 0) {
+        clearInterval(lockoutTimer);
+        lockoutTimer = null;
+        if (passwordInput) passwordInput.disabled = false;
+        if (lockSubmit) lockSubmit.disabled = false;
+        if (lockError) {
+          lockError.className = 'lock-error';
+          lockError.textContent = 'Lockout expired. You may try unlocking again.';
+        }
+        return;
+      }
+      const mins = Math.floor(secondsLeft / 60);
+      const secs = secondsLeft % 60;
+      const timeStr = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      if (lockError) {
+        lockError.className = 'lock-error lockout-warning';
+        lockError.innerHTML = `🔒 <b>Security Lockout Active</b><br>5 failed attempts detected. Notebook locked for 30 minutes.<br><b>Try again in ${timeStr}</b>`;
+      }
+      secondsLeft--;
+    }
+    update();
+    lockoutTimer = setInterval(update, 1000);
+  }
+
   // ---------- init ----------
   async function init() {
     populateControls();
     wireBookshelf();
+    wireEmojiPicker();
     try {
       const res = await fetch('/api/status');
       const status = await res.json();
@@ -129,16 +177,32 @@
       if (mode === 'setup') {
         lockTitle.textContent = 'Begin Your Notebook';
         lockSubtitle.textContent = 'Choose a password. It encrypts everything you write — there is no way to recover your notes without it, so keep it somewhere safe.';
+        if (lockBookCountBadge) lockBookCountBadge.hidden = true;
         confirmField.hidden = false;
         confirmInput.required = true;
         lockSubmit.textContent = 'Create Notebook';
       } else {
         lockTitle.textContent = 'Your Notebook';
         lockSubtitle.textContent = 'Enter your password to open it.';
+        if (lockBookCountBadge) {
+          if (status.bookCount !== undefined && status.bookCount > 0) {
+            lockBookCountBadge.hidden = false;
+            if (lockBookCountText) {
+              lockBookCountText.textContent = status.bookCount === 1 ? '1 Notebook in Library' : `${status.bookCount} Notebooks in Library`;
+            }
+          } else {
+            lockBookCountBadge.hidden = true;
+          }
+        }
         confirmField.hidden = true;
         confirmInput.required = false;
         lockSubmit.textContent = 'Unlock';
       }
+
+      if (status.lockedOut && status.remainingSeconds > 0) {
+        startLockoutCountdown(status.remainingSeconds);
+      }
+
       passwordInput.focus();
     } catch (err) {
       lockSubtitle.textContent = 'Could not reach the server. Is it running?';
@@ -402,9 +466,13 @@
       });
       const data = await res.json();
       if (!res.ok) {
-        lockError.textContent = data.error || 'Something went wrong.';
+        if (res.status === 429 || data.lockedOut) {
+          startLockoutCountdown(data.remainingSeconds || 1800);
+        } else {
+          lockError.textContent = data.error || 'Something went wrong.';
+          lockSubmit.disabled = false;
+        }
         shakeCard();
-        lockSubmit.disabled = false;
         return;
       }
       clasp.classList.add('open');
@@ -803,6 +871,146 @@
     scheduleSave();
   });
 
+  // ---------- emoji picker ----------
+  const EMOJI_DATA = {
+    smileys: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎','🤓','🧐','😕','😟','🙁','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤'],
+    gestures: ['👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦿','🦵','🦶','👂','🦻','👃','🧠','🫀','🫁','🦷','🦴','👀','👁️','👅','👄'],
+    books: ['📚','📖','📕','📗','📘','📙','📓','📔','📒','📜','📄','📰','📑','🔖','🏷️','📝','✏️','✒️','🖋️','🖊️','🖌️','🖍️','📌','📍','📎','🖇️','📏','📐','📋','📁','📂','🗂️','🗃️','🗳️','🏛️','🎓','🎒'],
+    nature: ['🌿','🌱','🌲','🌳','🌴','🌵','🌾','🍀','🍁','🍂','🍃','🌸','🌹','🌺','🌻','🌼','🌷','🐾','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🦅','🦆','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷️','🦂','🐢','🐍','🦎','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🐓','🦃','🦚','🦜','🦢','🦩','🕊️','🐇','🦝','🦨','🦡','🦦','🦥','🐁','🐀','🐿️','🦔'],
+    food: ['☕','🍵','🧃','🥤','🧋','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🫒','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🥨','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🫓','🥪','🥙','🧆','🌮','🌯','🫔','🥗','🥘','🫕','🥣','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥠','🥮','🍢','🍡','🍧','🍨','🍦','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯'],
+    objects: ['💡','🕯️','🔦','🏮','🪔','🧱','🪵','🪨','🧭','⏱️','⏲️','⏰','🕰️','⌛','⏳','📡','🔋','🪫','🔌','💻','🖥️','🖨️','⌨️','🖱️','🖲️','💽','💾','💿','📀','📱','☎️','📞','📟','📠','📺','📻','🎙️','🎚️','🎛️','🛑','🚧','🚨','🛞','⚓','🛟','🪝','🧰','🧲','🪜','🪛','🔧','🔨','⚒️','🛠️','⛏️','🪓','🪚','🔩','⚙️','🪤','🗝️','🔑','🔒','🔓','🔏','🔐'],
+    symbols: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','🆔','⚛️','🉑','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','✴️','❇️','✨','🌟','⭐','🌠','💫','⚡','☄️','💥','🔥','🌪️','🌈','☀️','🌤️','⛅','🌥️','☁️','🌦️','🌧️','🌨️','🌩️','❄️','☃️','⛄','🌬️','💨','💧','💦','🫧','☔','☂️','🌊','🎉','🎊','🎈','🎂','🎁','🎖️','🏆','🏅','🥇','🥈','🥉'],
+  };
+
+  let activeEmojiCategory = 'smileys';
+
+  function wireEmojiPicker() {
+    if (!emojiBtn || !emojiPicker) return;
+
+    emojiBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      saveSelection();
+      const isHidden = emojiPicker.hidden;
+      emojiPicker.hidden = !isHidden;
+      if (!emojiPicker.hidden) {
+        renderEmojiGrid(activeEmojiCategory);
+        if (emojiSearch) {
+          emojiSearch.value = '';
+          emojiSearch.focus();
+        }
+      }
+    });
+
+    if (closeEmojiPickerBtn) {
+      closeEmojiPickerBtn.addEventListener('click', () => {
+        emojiPicker.hidden = true;
+      });
+    }
+
+    if (emojiCategories) {
+      emojiCategories.querySelectorAll('.emoji-cat-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          emojiCategories.querySelectorAll('.emoji-cat-btn').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          activeEmojiCategory = btn.dataset.cat;
+          renderEmojiGrid(activeEmojiCategory, emojiSearch ? emojiSearch.value : '');
+        });
+      });
+    }
+
+    if (emojiSearch) {
+      emojiSearch.addEventListener('input', () => {
+        const query = emojiSearch.value.trim().toLowerCase();
+        renderEmojiGrid(activeEmojiCategory, query);
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (emojiPicker && !emojiPicker.hidden && !emojiPicker.contains(e.target) && e.target !== emojiBtn) {
+        emojiPicker.hidden = true;
+      }
+    });
+  }
+
+  function renderEmojiGrid(category, searchFilter = '') {
+    if (!emojiGrid) return;
+    emojiGrid.innerHTML = '';
+    let emojis = [];
+    if (searchFilter) {
+      Object.values(EMOJI_DATA).forEach((list) => {
+        emojis.push(...list);
+      });
+    } else {
+      emojis = EMOJI_DATA[category] || EMOJI_DATA.smileys;
+    }
+
+    emojis.forEach((emoji) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'emoji-item-btn';
+      btn.textContent = emoji;
+      btn.title = emoji;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        insertEmojiIntoActivePage(emoji);
+      });
+      emojiGrid.appendChild(btn);
+    });
+  }
+
+  function insertEmojiIntoActivePage(emoji) {
+    if (!activePageEl) activePageEl = leftPageEl;
+    activePageEl.focus();
+    restoreSelection();
+    document.execCommand('insertText', false, emoji);
+    syncSpreadFromDOM();
+    scheduleSave();
+    saveSelection();
+  }
+
+  // ---------- media & video: raw binary upload (up to 1GB) & on-the-fly streaming ----------
+
+  function uploadLargeMediaFile(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/media/upload', true);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name || 'media'));
+      const extMatch = file.name ? file.name.match(/\.([a-z0-9]+)$/i) : null;
+      const ext = extMatch ? extMatch[1] : (file.type.includes('video') ? 'mp4' : (file.type.includes('audio') ? 'mp3' : 'jpg'));
+      xhr.setRequestHeader('X-File-Ext', ext);
+
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            const loadedMB = (e.loaded / (1024 * 1024)).toFixed(1);
+            const totalMB = (e.total / (1024 * 1024)).toFixed(1);
+            onProgress(percent, loadedMB, totalMB);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          handleSessionLocked();
+          return reject(new Error('Session locked'));
+        }
+        try {
+          const json = JSON.parse(xhr.responseText);
+          if (!json.ok) return reject(new Error(json.error || 'Upload failed'));
+          resolve(json);
+        } catch (err) {
+          reject(new Error('Server response error'));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during media upload'));
+      xhr.send(file);
+    });
+  }
+
   // ---------- images: upload to server, insert /images/... URL ----------
 
   imageBtn.addEventListener('click', () => {
@@ -814,7 +1022,23 @@
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const url = await uploadImageFile(file);
+      let url;
+      // If large image (> 5MB) or animated/vector (GIF/SVG), use direct binary streaming upload
+      if (file.size > 5 * 1024 * 1024 || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        if (mediaUploadToast) {
+          mediaUploadToast.hidden = false;
+          if (toastTitle) toastTitle.textContent = `Uploading ${file.name}...`;
+          if (toastProgressFill) toastProgressFill.style.width = '0%';
+          if (toastStats) toastStats.textContent = `0% (0 MB / ${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
+        }
+        const data = await uploadLargeMediaFile(file, (percent, loadedMB, totalMB) => {
+          if (toastProgressFill) toastProgressFill.style.width = `${percent}%`;
+          if (toastStats) toastStats.textContent = `${percent}% (${loadedMB} MB / ${totalMB} MB)`;
+        });
+        url = data.url;
+      } else {
+        url = await uploadImageFile(file);
+      }
       activePageEl.focus();
       restoreSelection();
       document.execCommand('insertImage', false, url);
@@ -825,11 +1049,71 @@
       alert('Could not add that image: ' + err.message);
     } finally {
       imageFile.value = '';
+      if (mediaUploadToast) {
+        setTimeout(() => {
+          mediaUploadToast.hidden = true;
+        }, 800);
+      }
     }
   });
 
+  // ---------- video & audio: large binary upload (200-300MB+) & playback ----------
+
+  if (videoBtn && videoFile) {
+    videoBtn.addEventListener('click', () => {
+      saveSelection();
+      videoFile.click();
+    });
+
+    videoFile.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(file.name);
+      const totalMBStr = (file.size / (1024 * 1024)).toFixed(1);
+
+      if (mediaUploadToast) {
+        mediaUploadToast.hidden = false;
+        if (toastTitle) toastTitle.textContent = `Uploading ${isAudio ? 'Audio' : 'Video'} (${totalMBStr} MB)...`;
+        if (toastProgressFill) toastProgressFill.style.width = '0%';
+        if (toastStats) toastStats.textContent = `0% (0 MB / ${totalMBStr} MB)`;
+      }
+
+      try {
+        const data = await uploadLargeMediaFile(file, (percent, loadedMB, totalMB) => {
+          if (toastProgressFill) toastProgressFill.style.width = `${percent}%`;
+          if (toastStats) toastStats.textContent = `${percent}% (${loadedMB} MB / ${totalMB} MB)`;
+        });
+
+        if (!activePageEl) activePageEl = leftPageEl;
+        activePageEl.focus();
+        restoreSelection();
+
+        if (data.isAudio || isAudio) {
+          const audioHtml = `<div class="media-container audio-container" contenteditable="false"><audio class="vintage-audio" controls preload="metadata" src="${data.url}"></audio></div><p><br></p>`;
+          document.execCommand('insertHTML', false, audioHtml);
+        } else {
+          const videoHtml = `<div class="media-container video-container" contenteditable="false"><video class="vintage-video" controls playsinline preload="metadata" src="${data.url}"></video></div><p><br></p>`;
+          document.execCommand('insertHTML', false, videoHtml);
+        }
+
+        syncSpreadFromDOM();
+        scheduleSave();
+      } catch (err) {
+        alert('Could not upload video/media: ' + err.message);
+      } finally {
+        videoFile.value = '';
+        if (mediaUploadToast) {
+          setTimeout(() => {
+            mediaUploadToast.hidden = true;
+          }, 800);
+        }
+      }
+    });
+  }
+
   /**
-   * Resize the image client-side, then POST it to /api/images.
+   * Resize standard images client-side, then POST to /api/images.
    * Returns a server-relative URL like "/images/abc123.jpg".
    */
   async function uploadImageFile(file, maxDim = 1100, quality = 0.85) {
@@ -1073,13 +1357,15 @@
     if (!pageEl) return;
 
     // 1. Ensure any previously saved embed with empty/broken src gets initialized
+    // or migrated from slow proxy to fast GPU-accelerated embed (e.g. TradingView).
     pageEl.querySelectorAll('.nb-live-embed').forEach((embed) => {
       const iframe = embed.querySelector('.nb-live-embed__iframe');
       const url = embed.dataset.url;
       if (iframe && url) {
+        const expectedSrc = getIframeSrcForUrl(url);
         const curSrc = iframe.getAttribute('src') || '';
-        if (!curSrc || curSrc.includes('undefined') || curSrc === 'about:blank') {
-          iframe.src = getIframeSrcForUrl(url);
+        if (!curSrc || curSrc.includes('undefined') || curSrc === 'about:blank' || (url.includes('tradingview.com') && curSrc.includes('/api/proxy'))) {
+          iframe.src = expectedSrc;
         }
       }
     });
@@ -1351,6 +1637,28 @@
     return { type: 'link' };
   }
 
+  function parseTradingViewUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+      if (host.includes('tradingview.com') || host.includes('tradingview-widget.com')) {
+        let symbol = u.searchParams.get('symbol');
+        if (!symbol) {
+          const symMatch = u.pathname.match(/\/symbols\/([^\/]+)/i);
+          if (symMatch) {
+            symbol = symMatch[1].replace('-', ':');
+          }
+        }
+        if (!symbol) symbol = 'AAPL';
+        const interval = u.searchParams.get('interval') || 'D';
+        const theme = u.searchParams.get('theme') || 'dark';
+        return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=1f2b23&studies=[]&theme=${theme}&style=1&timezone=exchange`;
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function getIframeSrcForUrl(url) {
     if (!url) return '/api/proxy?url=about:blank';
     const trimmed = url.trim();
@@ -1361,6 +1669,11 @@
     const cloudDoc = parseCloudDoc(trimmed);
     if (cloudDoc && cloudDoc.embedUrl) {
       return cloudDoc.embedUrl;
+    }
+    // TradingView interactive charts — GPU-accelerated official embed widget
+    const tvEmbed = parseTradingViewUrl(trimmed);
+    if (tvEmbed) {
+      return tvEmbed;
     }
     // Root youtube.com — interactive built-in YouTube player portal
     if (/^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\/?$/i.test(trimmed)) {
@@ -1478,7 +1791,7 @@
           `</div>` +
         `</div>` +
         `<div class="nb-live-embed__frame-wrap">` +
-          `<iframe class="nb-live-embed__iframe" src="${escapeAttr(iframeSrc)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>` +
+          `<iframe class="nb-live-embed__iframe" src="${escapeAttr(iframeSrc)}" loading="eager" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; display-capture; fullscreen; geolocation; webgl; xr-spatial-tracking" allowfullscreen></iframe>` +
         `</div>` +
         `<div class="nb-live-embed__resize-handle" title="Drag to resize height"></div>` +
       `</div><br>`

@@ -21,6 +21,10 @@
         </svg>
       </div>
       <h1 id="lockTitle">Your Notebook</h1>
+      <div id="lockBookCountBadge" class="lock-book-count-badge" hidden>
+        <span class="lock-book-icon">📚</span>
+        <span id="lockBookCountText">1 Notebook in Library</span>
+      </div>
       <p id="lockSubtitle" class="lock-sub">Loading&hellip;</p>
 
       <form id="lockForm" class="lock-form">
@@ -76,7 +80,9 @@
           H
           <input type="color" id="highlightInput" value="#f6e27a" />
         </label>
+        <button type="button" id="emojiBtn" class="icon-btn" title="Insert Emoji">😀</button>
         <button type="button" id="imageBtn" class="icon-btn" title="Insert image from file">🖼</button>
+        <button type="button" id="videoBtn" class="icon-btn" title="Insert Video / Audio (up to 1GB)">🎥</button>
         <button type="button" id="linkBtn" class="icon-btn" title="Insert a live link">🔗</button>
         <button type="button" id="searchEmbedBtn" class="icon-btn" title="Search the Web & Embed">🔍</button>
       </div>
@@ -88,7 +94,42 @@
       </div>
     </header>
 
+    <!-- ============ EMOJI PICKER POPOVER ============ -->
+    <div id="emojiPicker" class="emoji-picker-popover" hidden>
+      <div class="emoji-header">
+        <input type="text" id="emojiSearch" class="emoji-search-input" placeholder="Search emojis (e.g. smile, heart, book)..." />
+        <button type="button" id="closeEmojiPickerBtn" class="emoji-close-btn" title="Close">✕</button>
+      </div>
+      <div class="emoji-categories" id="emojiCategories">
+        <button type="button" class="emoji-cat-btn active" data-cat="smileys" title="Smileys & Emotion">😀</button>
+        <button type="button" class="emoji-cat-btn" data-cat="gestures" title="People & Gestures">👋</button>
+        <button type="button" class="emoji-cat-btn" data-cat="books" title="Books & Study">📚</button>
+        <button type="button" class="emoji-cat-btn" data-cat="nature" title="Nature & Animals">🌿</button>
+        <button type="button" class="emoji-cat-btn" data-cat="food" title="Food & Drink">☕</button>
+        <button type="button" class="emoji-cat-btn" data-cat="objects" title="Objects & Tech">💡</button>
+        <button type="button" class="emoji-cat-btn" data-cat="symbols" title="Symbols & Hearts">✨</button>
+      </div>
+      <div class="emoji-grid" id="emojiGrid">
+        <!-- Dynamically rendered emojis -->
+      </div>
+    </div>
+
+    <!-- ============ MEDIA UPLOAD PROGRESS TOAST ============ -->
+    <div id="mediaUploadToast" class="media-upload-toast" hidden>
+      <div class="toast-content">
+        <div class="toast-header-row">
+          <span class="toast-icon">🎥</span>
+          <span class="toast-title" id="toastTitle">Uploading Media...</span>
+        </div>
+        <div class="toast-progress-bar-bg">
+          <div class="toast-progress-bar-fill" id="toastProgressFill" style="width: 0%;"></div>
+        </div>
+        <div class="toast-stats" id="toastStats">0% (0 MB / 0 MB)</div>
+      </div>
+    </div>
+
     <input type="file" id="imageFile" accept="image/*" hidden />
+    <input type="file" id="videoFile" accept="video/*,audio/*" hidden />
 
     <main class="book-room">
       <div class="book" id="book">

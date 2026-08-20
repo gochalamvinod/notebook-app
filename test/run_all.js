@@ -61,6 +61,12 @@ const TIERS = [
     file: 'test/tier7_hyper_10k.test.js',
     minTests: 10000,
   },
+  {
+    tier: 'Tier 8',
+    name: '100k (1 Lakh) Website Backtest Matrix',
+    file: 'test/tier8_100k_website_backtest.test.js',
+    minTests: 100,
+  },
 ];
 
 async function runTestFile(file) {

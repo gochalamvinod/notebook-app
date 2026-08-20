@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/run_all.js"
+    "test": "node test/run_all.js",
+    "test:100k": "node test/run_100k_backtest.js"
   },
   "license": "MIT",
   "dependencies": {
